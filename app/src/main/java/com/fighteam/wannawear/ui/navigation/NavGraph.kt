@@ -13,17 +13,25 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.fighteam.wannawear.data.AppState
+import com.fighteam.wannawear.data.model.MatchItem
 import com.fighteam.wannawear.ui.screen.*
 import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.delay
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    object Discover : Screen("discover", "발견",  Icons.Default.Search)
-    object Matches  : Screen("matches",  "매칭",  Icons.Default.Favorite)
-    object Closet   : Screen("closet",   "옷장",  Icons.Default.CheckCircle)
-    object Profile  : Screen("profile",  "나",    Icons.Default.Person)
+    object Discover      : Screen("discover",           "발견", Icons.Default.Search)
+    object Matches       : Screen("matches",            "매칭", Icons.Default.Favorite)
+    object Closet        : Screen("closet",             "옷장", Icons.Default.CheckCircle)
+    object Profile       : Screen("profile",            "나",   Icons.Default.Person)
+    object AddItem       : Screen("add_item",           "추가", Icons.Default.Add)
+    object Chat          : Screen("chat/{matchId}",     "채팅", Icons.Default.ChatBubbleOutline)
+    object ShippingGuide : Screen("shipping/{matchId}", "배송", Icons.Default.LocalShipping)
 }
 
 val bottomNavItems = listOf(Screen.Discover, Screen.Matches, Screen.Closet, Screen.Profile)
+
+private val hideBottomBarPrefixes = listOf("add_item", "chat/", "shipping/")
 
 @Composable
 fun WannaWearNavGraph() {
@@ -35,51 +43,82 @@ fun WannaWearNavGraph() {
     }
 
     val navController = rememberNavController()
-    val currentEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = currentEntry?.destination?.route
+    val currentEntry  by navController.currentBackStackEntryAsState()
+    val currentRoute  = currentEntry?.destination?.route ?: ""
+    val showBottomBar = hideBottomBarPrefixes.none { currentRoute.startsWith(it) }
+
+    // 지연 알림
+    var delayedMatchNotification by remember { mutableStateOf<MatchItem?>(null) }
+    LaunchedEffect(isLoggedIn) {
+        if (isLoggedIn && AppState.pendingMatchNotifications.isNotEmpty()) {
+            delay(3500L)
+            delayedMatchNotification = AppState.consumePendingNotification()
+        }
+    }
+    delayedMatchNotification?.let { match ->
+        RealMatchPopup(match = match, onClose = { delayedMatchNotification = null })
+    }
 
     Scaffold(
         containerColor = BgPrimary,
         bottomBar = {
-            NavigationBar(
-                containerColor = NavBgColor,
-                tonalElevation = 0.dp,
-                modifier = Modifier.height(66.dp)
-            ) {
-                bottomNavItems.forEach { screen ->
-                    val selected = currentRoute == screen.route
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                        icon = { Icon(screen.icon, contentDescription = screen.label, modifier = Modifier.size(20.dp)) },
-                        label = { Text(screen.label) },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = AccentYellow,
-                            selectedTextColor = AccentYellow,
-                            unselectedIconColor = TextTertiary,
-                            unselectedTextColor = TextTertiary,
-                            indicatorColor = NavBgColor
+            if (showBottomBar) {
+                NavigationBar(
+                    containerColor = NavBgColor,
+                    tonalElevation = 0.dp,
+                    modifier       = Modifier.height(66.dp)
+                ) {
+                    bottomNavItems.forEach { screen ->
+                        val selected = currentRoute == screen.route
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick  = {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState    = true
+                                }
+                            },
+                            icon  = { Icon(screen.icon, contentDescription = screen.label, modifier = Modifier.size(20.dp)) },
+                            label = { Text(screen.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor   = AccentYellow,
+                                selectedTextColor   = AccentYellow,
+                                unselectedIconColor = TextTertiary,
+                                unselectedTextColor = TextTertiary,
+                                indicatorColor      = NavBgColor
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
     ) { innerPadding ->
         NavHost(
-            navController = navController,
+            navController    = navController,
             startDestination = Screen.Discover.route,
-            modifier = Modifier.padding(innerPadding)
+            modifier         = Modifier.padding(innerPadding)
         ) {
             composable(Screen.Discover.route) { DiscoverScreen() }
-            composable(Screen.Matches.route)  { MatchesScreen() }
-            composable(Screen.Closet.route)   { ClosetScreen() }
+            composable(Screen.Matches.route) {
+                MatchesScreen(
+                    onOpenChat          = { matchId -> navController.navigate("chat/$matchId") },
+                    onOpenShippingGuide = { matchId -> navController.navigate("shipping/$matchId") }
+                )
+            }
+            composable(Screen.Closet.route) {
+                ClosetScreen(onNavigateToAdd = { navController.navigate(Screen.AddItem.route) })
+            }
             composable(Screen.Profile.route)  { ProfileScreen() }
+            composable(Screen.AddItem.route)  { AddItemScreen(onBack = { navController.popBackStack() }) }
+            composable("chat/{matchId}") { back ->
+                val matchId = back.arguments?.getString("matchId")?.toIntOrNull() ?: return@composable
+                ChatScreen(matchId = matchId, onBack = { navController.popBackStack() })
+            }
+            composable("shipping/{matchId}") { back ->
+                val matchId = back.arguments?.getString("matchId")?.toIntOrNull() ?: return@composable
+                ShippingGuideScreen(matchId = matchId, onBack = { navController.popBackStack() })
+            }
         }
     }
 }

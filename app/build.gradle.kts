@@ -48,6 +48,9 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
 
+    // Material Icons Extended (ChatBubbleOutline, LocalShipping 등)
+    implementation("androidx.compose.material:material-icons-extended:1.6.7")
+
     // 이미지 로딩
     implementation("io.coil-kt:coil-compose:2.6.0")
 
