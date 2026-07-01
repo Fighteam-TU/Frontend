@@ -94,8 +94,8 @@ fun UserProfileResponse.toUser(): User = User(
  *  ⚠️ 실 스펙엔 위치 기반 거리 정보가 없음 — distance는 항상 빈 문자열. */
 fun ItemResponse.toClothingItem(fallbackUser: User? = null): ClothingItem = ClothingItem(
     id           = id.toClientId(),
-    image        = imageUrl.fixBackendHost() ?: "",
-    wearingImage = wearingImageUrl.fixBackendHost() ?: "",
+    image        = imageUrl ?: "",
+    wearingImage = wearingImageUrl ?: "",
     name         = name ?: "",
     brand        = brand ?: "",
     size         = size ?: "",
