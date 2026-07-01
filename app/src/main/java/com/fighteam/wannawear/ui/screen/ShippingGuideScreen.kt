@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
+import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.ui.theme.*
 
 @Composable
@@ -34,7 +35,13 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
 
     val clipboard = LocalClipboardManager.current
     var copiedAddress  by remember { mutableStateOf(false) }
-    var shippingStarted by remember { mutableStateOf(false) }
+    // ✅ firstOrNull 중복 호출 제거 — status 한 번만 읽어서 비교
+    val alreadyShipped by remember {
+        derivedStateOf {
+            val status = AppState.matches.firstOrNull { it.id == matchId }?.status
+            status == ExchangeStatus.SHIPPING || status == ExchangeStatus.COMPLETE
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(BgPrimary)) {
 
@@ -172,11 +179,10 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
             Spacer(Modifier.height(28.dp))
 
             // 배송 완료 버튼
-            if (!shippingStarted) {
+            if (!alreadyShipped) {
                 Button(
                     onClick = {
                         AppState.startShipping(matchId)
-                        shippingStarted = true
                     },
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                     shape    = RoundedCornerShape(14.dp),

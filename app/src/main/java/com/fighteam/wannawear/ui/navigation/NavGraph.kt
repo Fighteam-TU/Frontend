@@ -35,7 +35,9 @@ private val hideBottomBarPrefixes = listOf("add_item", "chat/", "shipping/")
 
 @Composable
 fun WannaWearNavGraph() {
-    var isLoggedIn by remember { mutableStateOf(false) }
+    // ⚠️ 백엔드 로그인 연동 전 임시 처리: 로그인 화면을 건너뛰고 바로 로그인된 상태로 시작.
+    //    백엔드 인증이 연동되면 false로 되돌리고 LoginScreen에서 실제 로그인 처리 필요.
+    var isLoggedIn by remember { mutableStateOf(true) }
 
     if (!isLoggedIn) {
         LoginScreen(onLoginSuccess = { isLoggedIn = true })

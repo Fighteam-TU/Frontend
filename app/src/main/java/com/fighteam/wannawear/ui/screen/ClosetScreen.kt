@@ -30,6 +30,7 @@ import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.MatchResult
+import com.fighteam.wannawear.data.RemoveResult
 import com.fighteam.wannawear.data.model.*
 import com.fighteam.wannawear.ui.theme.*
 
@@ -53,6 +54,8 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
     var viewingUserCloset by remember { mutableStateOf<User?>(null) }
     var detailItem by remember { mutableStateOf<ClothingItem?>(null) }
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
+    var deleteConfirmItem by remember { mutableStateOf<ClothingItem?>(null) }
+    var deleteBlockedMessage by remember { mutableStateOf<String?>(null) }
 
     // 매치 팝업 (최우선)
     matchedResult?.let { match ->
@@ -73,16 +76,54 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
         )
     }
 
+    // 삭제 확인 다이얼로그
+    deleteConfirmItem?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deleteConfirmItem = null },
+            title = { Text("이 옷을 내릴까요?", fontWeight = FontWeight.Bold) },
+            text  = { Text("\"${item.name}\"이(가) 옷장과 발견 탭에서 사라져요. 이 작업은 되돌릴 수 없어요.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    when (AppState.removeMyItem(item.id)) {
+                        is RemoveResult.BlockedInExchange ->
+                            deleteBlockedMessage = "이미 교환이 진행 중인 옷은 내릴 수 없어요. 매칭 탭에서 먼저 교환을 완료해주세요."
+                        else -> {
+                            detailItem = null
+                        }
+                    }
+                    deleteConfirmItem = null
+                }) { Text("내리기", color = PassColor, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteConfirmItem = null }) { Text("취소") }
+            }
+        )
+    }
+
+    // 삭제 불가 안내 다이얼로그
+    deleteBlockedMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { deleteBlockedMessage = null },
+            title   = { Text("내릴 수 없어요", fontWeight = FontWeight.Bold) },
+            text    = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { deleteBlockedMessage = null }) { Text("확인") }
+            }
+        )
+    }
+
     // 상세보기 바텀시트
     detailItem?.let { item ->
         ItemDetailSheet(
-            item           = item,
-            showLikeButton = item.user.id != DummyData.me.id,
-            onLike         = {
+            item             = item,
+            showLikeButton   = item.user.id != DummyData.me.id,
+            showDeleteButton = item.user.id == DummyData.me.id,
+            onLike           = {
                 val result = AppState.likeItem(item)
                 if (result is MatchResult.Matched) matchedResult = result.match
                 detailItem = null
             },
+            onDelete  = { deleteConfirmItem = item },
             onDismiss = { detailItem = null }
         )
     }
@@ -117,7 +158,9 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
             ClosetTab.values().forEach { tab ->
                 val selected = selectedTab == tab
                 val badgeCount = when (tab) {
-                    ClosetTab.RECEIVED_LIKES -> AppState.getLikesOnMyItems().size
+                    // ✅ 실제 목록(ReceivedLikesTab)과 동일하게 완료된 교환 항목은 배지 카운트에서도 제외
+                    ClosetTab.RECEIVED_LIKES -> AppState.getLikesOnMyItems()
+                        .count { !AppState.isItemCompleted(it.toItemId) }
                     ClosetTab.MY_LIKES       -> AppState.myLikes.size
                     else                     -> 0
                 }
@@ -322,7 +365,9 @@ private fun MyLikesTab(
         verticalArrangement   = Arrangement.spacedBy(10.dp)
     ) {
         items(myLikes, key = { it.toItemId }) { like ->
-            val item = DummyData.discoverItems.firstOrNull { it.id == like.toItemId } ?: return@items
+            // ✅ 발견 풀(allDiscoverItems)뿐 아니라 매치에만 존재하는 아이템도 찾는
+            //    findClothingItemById 사용 — 안 그러면 이미 매칭된 옷이 누락될 수 있음
+            val item = AppState.findClothingItemById(like.toItemId) ?: return@items
             val alreadyLiked by remember { derivedStateOf { AppState.myLikes.any { it.toItemId == item.id } } }
             val inExchange by remember {
                 derivedStateOf {
@@ -432,7 +477,9 @@ fun ItemDetailSheet(
     item: ClothingItem,
     showLikeButton: Boolean,
     onLike: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    showDeleteButton: Boolean = false,
+    onDelete: () -> Unit = {}
 ) {
     val alreadyLiked by remember { derivedStateOf { AppState.myLikes.any { it.toItemId == item.id } } }
 
@@ -536,6 +583,21 @@ fun ItemDetailSheet(
                         Spacer(Modifier.width(8.dp))
                         Text(if (alreadyLiked) "관심 취소하기" else "이 옷에 관심 보내기",
                             fontWeight = FontWeight.Black, fontSize = 15.sp)
+                    }
+                }
+
+                if (showDeleteButton) {
+                    Spacer(Modifier.height(20.dp))
+                    OutlinedButton(
+                        onClick = { onDelete() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, PassColor),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = PassColor)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("이 옷 내리기", fontWeight = FontWeight.Black, fontSize = 15.sp)
                     }
                 }
             }

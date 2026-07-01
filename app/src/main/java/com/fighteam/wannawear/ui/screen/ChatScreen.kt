@@ -29,6 +29,7 @@ import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.ui.theme.*
 import kotlinx.coroutines.launch
 
+
 @Composable
 fun ChatScreen(matchId: Int, onBack: () -> Unit) {
     val match = AppState.matches.firstOrNull { it.id == matchId }
@@ -37,16 +38,15 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
     val messages = match.messages
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val scope     = rememberCoroutineScope()
     val chatOpen  = AppState.isChatOpen(match.status)
 
-    // 새 메시지 오면 맨 아래로 스크롤
+    // ✅ messages.size 로 항상 마지막 인덱스 정확히 지정
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty())
             listState.animateScrollToItem(messages.size - 1)
     }
 
-    Column(Modifier.fillMaxSize().background(BgPrimary)) {
+    Column(Modifier.fillMaxSize().background(BgPrimary).imePadding()) {
 
         // ── 앱바 ───────────────────────────────────────────────────
         Row(
@@ -170,7 +170,7 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
                         if (inputText.isNotBlank()) {
                             AppState.sendMessage(matchId, inputText)
                             inputText = ""
-                            scope.launch { listState.animateScrollToItem(messages.size - 1) }
+                            // LaunchedEffect(messages.size) 가 자동 스크롤 처리
                         }
                     })
                 )
@@ -189,10 +189,7 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
                         if (inputText.isNotBlank()) {
                             AppState.sendMessage(matchId, inputText)
                             inputText = ""
-                            scope.launch {
-                                if (messages.isNotEmpty())
-                                    listState.animateScrollToItem(messages.size - 1)
-                            }
+                            // LaunchedEffect(messages.size) 가 자동 스크롤 처리
                         }
                     }) {
                         Icon(

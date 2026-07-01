@@ -22,6 +22,7 @@ import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.model.*
 import com.fighteam.wannawear.ui.theme.*
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddItemScreen(onBack: () -> Unit) {
     var photoUrl by remember { mutableStateOf("") }        // 대표 사진 URL (실제 앱 = 갤러리)
@@ -60,7 +61,7 @@ fun AddItemScreen(onBack: () -> Unit) {
                 onClick = {
                     if (canSave) {
                         val newItem = ClothingItem(
-                            id = System.currentTimeMillis().toInt(),
+                            id = (AppState.myCloset.maxOfOrNull { it.id } ?: 1000) + 1, // #4 오버플로 방지
                             image = photoUrl.ifBlank { "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=200&h=260&fit=crop" },
                             wearingImage = wearingUrl,
                             name = name,
@@ -255,7 +256,12 @@ fun AddItemScreen(onBack: () -> Unit) {
 
             if (tags.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // #3: FlowRow로 교체 — 태그가 많아도 자동 줄바꿈
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement   = Arrangement.spacedBy(6.dp)
+                ) {
                     tags.forEach { tag ->
                         Row(
                             Modifier
@@ -265,7 +271,8 @@ fun AddItemScreen(onBack: () -> Unit) {
                         ) {
                             Text("#$tag", color = TextPrimary, fontSize = 11.sp)
                             Spacer(Modifier.width(4.dp))
-                            Icon(Icons.Default.Close, contentDescription = null, tint = TextTertiary,
+                            Icon(Icons.Default.Close, contentDescription = null,
+                                tint = TextTertiary,
                                 modifier = Modifier.size(12.dp).clickable { tags = tags - tag })
                         }
                     }
