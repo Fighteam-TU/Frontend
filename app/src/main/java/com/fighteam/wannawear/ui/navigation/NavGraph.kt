@@ -1,8 +1,5 @@
 package com.fighteam.wannawear.ui.navigation
 
-import android.Manifest
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -10,7 +7,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -19,13 +15,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.model.MatchItem
-import com.fighteam.wannawear.data.remote.LocationProvider
 import com.fighteam.wannawear.data.remote.SessionEvents
 import com.fighteam.wannawear.data.remote.TokenManager
 import com.fighteam.wannawear.ui.screen.*
 import com.fighteam.wannawear.ui.theme.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     object Discover      : Screen("discover",           "발견", Icons.Default.Search)
@@ -35,19 +29,17 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object AddItem       : Screen("add_item",           "추가", Icons.Default.Add)
     object Chat          : Screen("chat/{matchId}",     "채팅", Icons.Default.ChatBubbleOutline)
     object ShippingGuide : Screen("shipping/{matchId}", "배송", Icons.Default.LocalShipping)
+    object AddressManage : Screen("address_manage",     "배송지", Icons.Default.Place)
 }
 
 val bottomNavItems = listOf(Screen.Discover, Screen.Matches, Screen.Closet, Screen.Profile)
 
-private val hideBottomBarPrefixes = listOf("add_item", "chat/", "shipping/")
+private val hideBottomBarPrefixes = listOf("add_item", "chat/", "shipping/", "address_manage")
 
 @Composable
 fun WannaWearNavGraph() {
-    // ✅ 백엔드 로그인 연동 완료: refreshToken이 저장돼 있으면(이전 로그인 유지) 바로 메인으로,
-    //    없으면 로그인 화면부터 시작.
+    // ✅ refreshToken이 저장돼 있으면(이전 로그인 유지) 바로 메인으로, 없으면 로그인 화면부터 시작.
     var isLoggedIn by remember { mutableStateOf(TokenManager.isLoggedIn) }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     // 리프레시 토큰까지 만료/무효화되면(TokenAuthenticator가 감지) 강제로 로그인 화면으로
     val sessionExpired by SessionEvents.sessionExpired
@@ -58,26 +50,11 @@ fun WannaWearNavGraph() {
         }
     }
 
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        scope.launch {
-            val (lat, lng) = LocationProvider.getCurrentLatLng(context)
-            AppState.loadInitialData(lat, lng)
-        }
-    }
-
-    // 로그인된 상태가 되면(최초 진입 시 이미 로그인돼 있던 경우 포함) 위치 권한 확인 후 초기 데이터 로드
+    // 로그인된 상태가 되면(최초 진입 시 이미 로그인돼 있던 경우 포함) 초기 데이터 로드
+    // ⚠️ 발견 탭은 위치 파라미터가 없는 스펙이라 위치 권한/좌표가 필요 없음
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
-            if (LocationProvider.hasLocationPermission(context)) {
-                val (lat, lng) = LocationProvider.getCurrentLatLng(context)
-                AppState.loadInitialData(lat, lng)
-            } else {
-                locationPermissionLauncher.launch(
-                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-                )
-            }
+            AppState.loadInitialData()
         }
     }
 
@@ -153,8 +130,11 @@ fun WannaWearNavGraph() {
             composable(Screen.Closet.route) {
                 ClosetScreen(onNavigateToAdd = { navController.navigate(Screen.AddItem.route) })
             }
-            composable(Screen.Profile.route)  { ProfileScreen() }
+            composable(Screen.Profile.route)  {
+                ProfileScreen(onNavigateToAddress = { navController.navigate(Screen.AddressManage.route) })
+            }
             composable(Screen.AddItem.route)  { AddItemScreen(onBack = { navController.popBackStack() }) }
+            composable(Screen.AddressManage.route) { AddressScreen(onBack = { navController.popBackStack() }) }
             composable("chat/{matchId}") { back ->
                 val matchId = back.arguments?.getString("matchId")?.toIntOrNull() ?: return@composable
                 ChatScreen(matchId = matchId, onBack = { navController.popBackStack() })

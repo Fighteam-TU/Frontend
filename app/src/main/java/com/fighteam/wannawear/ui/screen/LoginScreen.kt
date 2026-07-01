@@ -2,8 +2,10 @@ package com.fighteam.wannawear.ui.screen
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -89,38 +91,42 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(BgPrimary)) {
 
-        // Hero Image
-        Box(Modifier.fillMaxWidth().fillMaxHeight(0.42f)) {
-            AsyncImage(
-                model              = "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=420&h=380&fit=crop&auto=format&q=90",
-                contentDescription = null,
-                contentScale       = ContentScale.Crop,
-                modifier           = Modifier.fillMaxSize()
-            )
-            Box(
-                Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(listOf(Color(0x4D0C0B0A), Color.Transparent, BgPrimary))
-                )
-            )
-            Text(
-                text       = "WannaWear",
-                color      = TextPrimary,
-                fontSize   = 32.sp,
-                fontWeight = FontWeight.Black,
-                fontStyle  = FontStyle.Italic,
-                modifier   = Modifier.padding(24.dp).align(Alignment.TopStart)
-            )
-        }
-
-        // 하단 패널
         Column(
             Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.62f)
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .fillMaxSize()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
         ) {
+            // Hero Image — 고정 높이로 바꿔서 키보드 올라와도 안 밀림
+            Box(Modifier.fillMaxWidth().height(260.dp)) {
+                AsyncImage(
+                    model              = "https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=420&h=380&fit=crop&auto=format&q=90",
+                    contentDescription = null,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxSize()
+                )
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(listOf(Color(0x4D0C0B0A), Color.Transparent, BgPrimary))
+                    )
+                )
+                Text(
+                    text       = "WannaWear",
+                    color      = TextPrimary,
+                    fontSize   = 32.sp,
+                    fontWeight = FontWeight.Black,
+                    fontStyle  = FontStyle.Italic,
+                    modifier   = Modifier.padding(24.dp).align(Alignment.TopStart)
+                )
+            }
+
+            // 하단 패널 — 이제 일반 플로우 안에 있어서 스크롤 대상에 포함됨
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             Text(
                 "입지 않는 옷에\n새 주인을 찾아줘요",
                 color      = TextPrimary,
@@ -249,6 +255,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 }
             }
         }
+        } // close 스크롤 가능한 outer Column
 
         SnackbarHost(
             hostState = snackbarHostState,

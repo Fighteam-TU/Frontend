@@ -19,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,7 +28,6 @@ import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.MatchResult
 import com.fighteam.wannawear.data.model.ClothingItem
 import com.fighteam.wannawear.data.model.MatchItem
-import com.fighteam.wannawear.data.remote.LocationProvider
 import com.fighteam.wannawear.ui.theme.*
 import kotlin.math.abs
 import kotlinx.coroutines.launch
@@ -38,16 +36,14 @@ import kotlinx.coroutines.launch
 fun DiscoverScreen() {
     val cards = AppState.discoverCards
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
-    val context = LocalContext.current
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // 최초 진입 시 발견 덱이 비어있으면(로그인 직후 위치 못 구했던 경우 등) 한 번 더 로드 시도
+    // 최초 진입 시 발견 덱이 비어있으면 한 번 더 로드 시도
     LaunchedEffect(Unit) {
         if (cards.isEmpty() && !AppState.isLoading) {
-            val (lat, lng) = LocationProvider.getCurrentLatLng(context)
-            AppState.refreshDiscoverFeed(lat, lng)
+            AppState.refreshDiscoverFeed()
         }
     }
 
@@ -99,10 +95,7 @@ fun DiscoverScreen() {
                             color = TextSecondary, fontSize = 13.sp)
                         Button(
                             onClick = {
-                                scope.launch {
-                                    val (lat, lng) = LocationProvider.getCurrentLatLng(context)
-                                    AppState.refreshDiscoverFeed(lat, lng)
-                                }
+                                scope.launch { AppState.refreshDiscoverFeed() }
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = AccentYellow,
@@ -168,8 +161,7 @@ fun DiscoverScreen() {
                     // 새 아이템 보기
                     IconButton(onClick = {
                         scope.launch {
-                            val (lat, lng) = LocationProvider.getCurrentLatLng(context)
-                            AppState.refreshDiscoverFeed(lat, lng)
+                            AppState.refreshDiscoverFeed()
                             snackbarHostState.showSnackbar(
                                 message  = "새 아이템을 불러왔어요 ✨",
                                 duration = SnackbarDuration.Short

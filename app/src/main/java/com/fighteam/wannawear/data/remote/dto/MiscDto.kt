@@ -1,17 +1,6 @@
 package com.fighteam.wannawear.data.remote.dto
 
-data class DeviceTokenRequest(
-    val fcmToken: String,
-    val platform: String? = "android"
-)
-
-data class SwipeRequest(
-    val clothesId: Long,
-    val liked: Boolean
-)
-
-data class CardData(
-    val ownerId: Long? = null,
-    val clothesId: Long? = null,
-    val clothesUrl: String? = null
+/** POST /api/uploads 응답: { fileUrl } — 이 값을 그대로 imageUrl/avatarUrl 등에 넣으면 됨 */
+data class UploadResponse(
+    val fileUrl: String
 )

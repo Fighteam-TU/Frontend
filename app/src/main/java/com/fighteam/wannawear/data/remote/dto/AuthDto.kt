@@ -30,5 +30,6 @@ data class AuthResponse(
 data class UserSummaryDto(
     val id: Long,
     val nickname: String? = null,
-    val avatarUrl: String? = null
+    val avatarUrl: String? = null,
+    val mannerScore: Double? = null
 )

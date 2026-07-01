@@ -39,23 +39,16 @@ data class ItemResponse(
     val imageUrl: String? = null,
     val wearingImageUrl: String? = null,
     val tags: List<String>? = null,
-    val distanceKm: Double? = null,
     val likeCount: Int? = null,
+    // 일부 API(좋아요 매칭 결과 등)에서는 null로 옴
     val isLikedByMe: Boolean? = null,
     val createdAt: String? = null,
     val user: UserSummaryDto? = null
 )
 
-/**
- * ⚠️ /api/items/discover, /api/items/me, /api/users/{id}/closet 는 스웨거상
- * ApiResponseMapStringObject(즉, data가 Map<String, Any>)로만 노출되어 있어
- * 정확한 페이지네이션 필드명이 스펙에 없음. items/list/content 순서로 추정해서
- * 파싱하고, total/hasNext 류는 있으면 쓰고 없으면 무시하도록 방어적으로 작성함.
- * 실제 응답을 한 번 확인해서 필드명이 다르면 ItemListEnvelope 파싱 부분만 고치면 됨.
- */
+/** GET /items/discover, /items/me, /users/{id}/closet 공통 응답 형태: { items, total? } */
 data class ItemListEnvelope(
     val items: List<ItemResponse> = emptyList(),
-    val total: Int? = null,
-    val page: Int? = null,
-    val hasNext: Boolean? = null
+    val total: Long? = null,
+    val page: Int? = null
 )

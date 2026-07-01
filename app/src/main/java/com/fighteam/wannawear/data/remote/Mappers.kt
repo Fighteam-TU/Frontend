@@ -3,53 +3,12 @@ package com.fighteam.wannawear.data.remote
 import androidx.compose.runtime.mutableStateListOf
 import com.fighteam.wannawear.data.model.*
 import com.fighteam.wannawear.data.remote.dto.*
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
-/**
- * 서버 응답 DTO ↔ 클라이언트 도메인 모델(Models.kt) 변환 지점.
- * ⚠️ /items/discover, /items/me, /exchanges, /exchanges/{id}/messages, /users/{id}/closet 는
- * 스웨거상 정확한 리스트 필드명이 없는 MapStringObject라, items/exchanges/messages 등
- * "가장 그럴듯한 키 이름"으로 추정해서 꺼낸다. 실제 응답 확인 후 다르면 아래 extract* 함수의
- * 후보 키 목록만 조정하면 된다.
- */
-private val gson = Gson()
-
-// ── 느슨한 Map 응답에서 리스트 뽑아내기 ──────────────────────────────
-
-private fun candidateList(map: Map<String, Any?>?, keys: List<String>): List<Any?> {
-    if (map == null) return emptyList()
-    for (key in keys) {
-        val value = map[key]
-        if (value is List<*>) return value
-    }
-    return emptyList()
-}
-
-private inline fun <reified T> Any?.toDto(): T? {
-    if (this == null) return null
-    return try {
-        gson.fromJson(gson.toJson(this), T::class.java)
-    } catch (e: Exception) {
-        null
-    }
-}
-
-fun extractItems(map: Map<String, Any?>?): List<ItemResponse> =
-    candidateList(map, listOf("items", "content", "list", "results")).mapNotNull { it.toDto<ItemResponse>() }
-
-fun extractExchanges(map: Map<String, Any?>?): List<ExchangeResponse> =
-    candidateList(map, listOf("exchanges", "items", "content", "list")).mapNotNull { it.toDto<ExchangeResponse>() }
-
-fun extractMessages(map: Map<String, Any?>?): List<MessageResponse> =
-    candidateList(map, listOf("messages", "items", "content", "list")).mapNotNull { it.toDto<MessageResponse>() }
-
-fun List<Map<String, Any?>>?.toLikeEntries(): List<LikeEntryDto> =
-    this?.mapNotNull { it.toDto<LikeEntryDto>() } ?: emptyList()
+/** 서버 응답 DTO ↔ 클라이언트 도메인 모델(Models.kt) 변환 지점. */
 
 // ── ID / 문자열 변환 헬퍼 ────────────────────────────────────────────
 
@@ -70,11 +29,11 @@ fun parseExchangeStatus(raw: String?): ExchangeStatus =
         ExchangeStatus.MATCHED
     }
 
-/** ISO-8601(ex: 2026-06-30T10:20:00Z) -> "방금"/"n분 전"/"n시간 전"/"n일 전" */
+/** ISO-8601(ex: 2026-06-30T10:20:00.123 또는 ...Z) -> "방금"/"n분 전"/"n시간 전"/"n일 전" */
 fun formatRelativeDate(iso: String?): String {
     if (iso.isNullOrBlank()) return ""
     return try {
-        val instant = Instant.parse(iso)
+        val instant = parseIsoInstant(iso)
         val minutes = ChronoUnit.MINUTES.between(instant, Instant.now())
         when {
             minutes < 1 -> "방금"
@@ -91,12 +50,22 @@ fun formatRelativeDate(iso: String?): String {
 fun formatClockTime(iso: String?): String {
     if (iso.isNullOrBlank()) return ""
     return try {
-        Instant.parse(iso).atZone(ZoneId.systemDefault())
+        parseIsoInstant(iso).atZone(ZoneId.systemDefault())
             .format(DateTimeFormatter.ofPattern("HH:mm"))
     } catch (e: Exception) {
         ""
     }
 }
+
+/** 서버가 오프셋 있는 Instant("...Z")와 오프셋 없는 LocalDateTime("2026-07-01T14:16:41.606")을
+ *  섞어서 내려주므로 (spec 7절 createdAt, 2절 timestamp 예시가 서로 다름) 둘 다 시도한다.
+ *  LocalDateTime 문자열은 서버 로컬 타임존(KST)로 간주. */
+private fun parseIsoInstant(iso: String): Instant =
+    try {
+        Instant.parse(iso)
+    } catch (e: Exception) {
+        java.time.LocalDateTime.parse(iso).atZone(ZoneId.of("Asia/Seoul")).toInstant()
+    }
 
 // ── DTO → 도메인 모델 ────────────────────────────────────────────────
 
@@ -121,11 +90,12 @@ fun UserProfileResponse.toUser(): User = User(
     avatar = avatarUrl ?: ""
 )
 
-/** ItemResponse.user 가 없을 때(내 아이템 목록 등)는 fallbackUser로 채운다 */
+/** ItemResponse.user 가 없을 때(내 아이템 목록 등)는 fallbackUser로 채운다.
+ *  ⚠️ 실 스펙엔 위치 기반 거리 정보가 없음 — distance는 항상 빈 문자열. */
 fun ItemResponse.toClothingItem(fallbackUser: User? = null): ClothingItem = ClothingItem(
     id           = id.toClientId(),
-    image        = imageUrl ?: "",
-    wearingImage = wearingImageUrl ?: "",
+    image        = imageUrl.fixBackendHost() ?: "",
+    wearingImage = wearingImageUrl.fixBackendHost() ?: "",
     name         = name ?: "",
     brand        = brand ?: "",
     size         = size ?: "",
@@ -134,7 +104,7 @@ fun ItemResponse.toClothingItem(fallbackUser: User? = null): ClothingItem = Clot
     category     = parseCategory(category),
     description  = description ?: "",
     user         = user?.toUser() ?: fallbackUser ?: User(0, "", 0, ""),
-    distance     = distanceKm?.let { "%.1fkm".format(it) } ?: "",
+    distance     = "",
     tags         = tags ?: emptyList(),
     isListed     = true
 )
@@ -146,8 +116,18 @@ fun MessageResponse.toChatMessage(): ChatMessage = ChatMessage(
     timestamp = formatClockTime(sentAt)
 )
 
-/** ExchangeResponse -> MatchItem. 메시지 목록은 여기서 채우지 않고, 채팅방 진입 시
- *  AppState.loadMessages()로 별도 로드한다 (목록 API 응답엔 메시지 전문이 없음). */
+fun AddressResponse.toAddress(): Address = Address(
+    id         = id.toClientId(),
+    label      = label ?: "기본 주소",
+    recipient  = recipient ?: "",
+    postalCode = postalCode ?: "",
+    address1   = address1 ?: "",
+    address2   = address2 ?: "",
+    isDefault  = isDefault ?: false
+)
+
+/** 교환 목록/상세 조회로 받은 ExchangeResponse -> MatchItem.
+ *  메시지 목록은 여기서 채우지 않고, 채팅방 진입 시 AppState.loadMessages()로 별도 로드. */
 fun ExchangeResponse.toMatchItem(): MatchItem = MatchItem(
     id             = id.toClientId(),
     myItem         = myItem?.toClothingItem() ?: emptyClothingItem(),
@@ -156,7 +136,27 @@ fun ExchangeResponse.toMatchItem(): MatchItem = MatchItem(
     status         = parseExchangeStatus(status),
     date           = formatRelativeDate(matchedAt),
     messages       = mutableStateListOf(),
-    partnerAddress = partnerAddress ?: "주소 정보 없음"
+    partnerAddress = partnerAddress,
+    myConfirmed    = myConfirmed ?: false,
+    theirConfirmed = theirConfirmed ?: false,
+    myShipped      = myShipped ?: false,
+    theirShipped   = theirShipped ?: false,
+    myReceived     = myReceived ?: false,
+    theirReceived  = theirReceived ?: false,
+    cancelledByMe  = cancelledByMe
+)
+
+/** POST /likes/{itemId} 매칭 성립 시 오는 ExchangeSummaryDto -> MatchItem.
+ *  partnerItem = 상대가 낸(=내가 받을) 아이템, myItem = 내가 낸(=상대가 받을) 아이템. */
+fun ExchangeSummaryDto.toMatchItem(): MatchItem = MatchItem(
+    id             = id.toClientId(),
+    myItem         = myItem?.toClothingItem() ?: emptyClothingItem(),
+    theirItem      = partnerItem?.toClothingItem() ?: emptyClothingItem(),
+    partner        = partner?.toUser() ?: User(0, "알 수 없음", 0, ""),
+    status         = parseExchangeStatus(status ?: "MATCHED"),
+    date           = "방금",
+    messages       = mutableStateListOf(),
+    partnerAddress = null
 )
 
 private fun emptyClothingItem(): ClothingItem = ClothingItem(

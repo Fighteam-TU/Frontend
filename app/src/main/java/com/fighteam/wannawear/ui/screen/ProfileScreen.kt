@@ -1,6 +1,7 @@
 package com.fighteam.wannawear.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -22,7 +23,7 @@ import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.ui.theme.*
 
 @Composable
-fun ProfileScreen() {
+fun ProfileScreen(onNavigateToAddress: () -> Unit = {}) {
     val me = AppState.myProfile
     // #10: 하드코딩 제거 → AppState 실제 데이터 사용
     val completedCount by remember {
@@ -165,11 +166,17 @@ fun ProfileScreen() {
             Modifier.padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            listOf("프로필 수정", "교환 내역", "설정").forEach { label ->
+            listOf(
+                "프로필 수정" to {},
+                "배송지 관리" to onNavigateToAddress,
+                "교환 내역" to {},
+                "설정" to {}
+            ).forEach { (label, onClick) ->
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .background(BgCard, RoundedCornerShape(12.dp))
+                        .clickable(onClick = onClick)
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment     = Alignment.CenterVertically

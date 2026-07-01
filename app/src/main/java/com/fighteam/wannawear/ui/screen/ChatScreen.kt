@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.model.ExchangeStatus
+import com.fighteam.wannawear.data.remote.ChatSocketManager
 import com.fighteam.wannawear.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -39,9 +40,11 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
     val listState = rememberLazyListState()
     val chatOpen  = AppState.isChatOpen(match.status)
 
-    // 채팅방 진입 시 서버에서 메시지 이력 로드 + 읽음 처리
-    LaunchedEffect(matchId) {
+    // 채팅방 진입 시: REST로 히스토리 로드 + 읽음 처리, WebSocket 연결(실시간 수신용, API_SPEC 12절 메인 경로)
+    DisposableEffect(matchId) {
         AppState.loadMessages(matchId)
+        ChatSocketManager.connect(matchId)
+        onDispose { ChatSocketManager.disconnect() }
     }
 
     // ✅ messages.size 로 항상 마지막 인덱스 정확히 지정
@@ -172,7 +175,7 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = {
                         if (inputText.isNotBlank()) {
-                            AppState.sendMessage(matchId, inputText)
+                            ChatSocketManager.sendMessage(matchId, inputText)
                             inputText = ""
                             // LaunchedEffect(messages.size) 가 자동 스크롤 처리
                         }
@@ -191,7 +194,7 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
                 ) {
                     IconButton(onClick = {
                         if (inputText.isNotBlank()) {
-                            AppState.sendMessage(matchId, inputText)
+                            ChatSocketManager.sendMessage(matchId, inputText)
                             inputText = ""
                             // LaunchedEffect(messages.size) 가 자동 스크롤 처리
                         }

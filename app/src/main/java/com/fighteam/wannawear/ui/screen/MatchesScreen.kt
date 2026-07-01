@@ -9,7 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
+import com.fighteam.wannawear.data.ConfirmResult
 import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.data.model.MatchItem
 import com.fighteam.wannawear.ui.theme.*
@@ -29,6 +30,38 @@ fun MatchesScreen(
     onOpenShippingGuide: (Int) -> Unit = {}
 ) {
     val matches = AppState.matches
+    // ⚠️ confirm 하려면 본인 기본 배송주소가 있어야 함(API_SPEC 6절) — 없으면 이 다이얼로그로 유도
+    var addressPromptMatchId by remember { mutableStateOf<Int?>(null) }
+    var cancelConfirmMatchId by remember { mutableStateOf<Int?>(null) }
+
+    addressPromptMatchId?.let { matchId ->
+        AddressPromptDialog(
+            onDismiss = { addressPromptMatchId = null },
+            onSubmit  = { address1, recipient ->
+                AppState.addAddress(address1 = address1, recipient = recipient.ifBlank { null }) { success ->
+                    addressPromptMatchId = null
+                    if (success) AppState.confirmExchange(matchId)
+                }
+            }
+        )
+    }
+
+    cancelConfirmMatchId?.let { matchId ->
+        AlertDialog(
+            onDismissRequest = { cancelConfirmMatchId = null },
+            title = { Text("교환을 취소할까요?", fontWeight = FontWeight.Bold) },
+            text  = { Text("매칭이 즉시 취소되고 상대방 동의는 필요 없어요. 되돌릴 수 없어요.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    AppState.cancelExchange(matchId)
+                    cancelConfirmMatchId = null
+                }) { Text("취소하기", color = PassColor, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { cancelConfirmMatchId = null }) { Text("닫기") }
+            }
+        )
+    }
 
     Column(Modifier.fillMaxSize().background(BgPrimary)) {
         Column(Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp)) {
@@ -44,7 +77,9 @@ fun MatchesScreen(
                 MatchCard(
                     match               = match,
                     onOpenChat          = { onOpenChat(match.id) },
-                    onOpenShippingGuide = { onOpenShippingGuide(match.id) }
+                    onOpenShippingGuide = { onOpenShippingGuide(match.id) },
+                    onNeedsAddress      = { addressPromptMatchId = match.id },
+                    onRequestCancel     = { cancelConfirmMatchId = match.id }
                 )
             }
         }
@@ -52,10 +87,55 @@ fun MatchesScreen(
 }
 
 @Composable
+private fun AddressPromptDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (address1: String, recipient: String) -> Unit
+) {
+    var address1 by remember { mutableStateOf("") }
+    var recipient by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("배송 주소가 필요해요", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("교환을 확정하려면 기본 배송지가 1개 있어야 해요. 상대방이 confirm 하면 이 주소가 상대방에게 보여요.",
+                    color = TextSecondary, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = address1,
+                    onValueChange = { address1 = it },
+                    placeholder = { Text("주소 *  ex) 서울특별시 중구 세종대로 110") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = recipient,
+                    onValueChange = { recipient = it },
+                    placeholder = { Text("받는 사람 (선택)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (address1.isNotBlank()) onSubmit(address1, recipient) },
+                enabled = address1.isNotBlank()
+            ) { Text("저장하고 확정", fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        }
+    )
+}
+
+@Composable
 fun MatchCard(
     match:               MatchItem,
     onOpenChat:          () -> Unit = {},
-    onOpenShippingGuide: () -> Unit = {}
+    onOpenShippingGuide: () -> Unit = {},
+    onNeedsAddress:      () -> Unit = {},
+    onRequestCancel:     () -> Unit = {}
 ) {
     val (statusColor, statusBg) = when (match.status) {
         ExchangeStatus.WAITING   -> Pair(StatusPending,  StatusPending.copy(alpha = 0.12f))
@@ -63,6 +143,7 @@ fun MatchCard(
         ExchangeStatus.CONFIRMED -> Pair(StatusShipping, StatusShipping.copy(alpha = 0.12f))
         ExchangeStatus.SHIPPING  -> Pair(StatusShipping, StatusShipping.copy(alpha = 0.12f))
         ExchangeStatus.COMPLETE  -> Pair(StatusComplete, StatusComplete.copy(alpha = 0.12f))
+        ExchangeStatus.CANCELLED -> Pair(TextTertiary,   TextTertiary.copy(alpha = 0.12f))
     }
 
     Column(
@@ -90,6 +171,31 @@ fun MatchCard(
         if (match.status == ExchangeStatus.MATCHED || match.status == ExchangeStatus.WAITING) {
             Spacer(Modifier.height(8.dp))
             Text(match.status.description, color = TextSecondary, fontSize = 11.sp)
+        }
+
+        // confirm/ship/complete는 양쪽이 각자 호출해야 넘어가는 방식 — 내가 이미 했는데
+        // 상대가 아직이면 대기 안내를 보여준다
+        val waitingOnPartner = when (match.status) {
+            ExchangeStatus.MATCHED   -> match.myConfirmed && !match.theirConfirmed
+            ExchangeStatus.CONFIRMED -> match.myShipped && !match.theirShipped
+            ExchangeStatus.SHIPPING  -> match.myReceived && !match.theirReceived
+            else -> false
+        }
+        if (waitingOnPartner) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.HourglassEmpty, contentDescription = null,
+                    tint = StatusPending, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("상대방 확인을 기다리는 중이에요", color = StatusPending, fontSize = 11.sp)
+            }
+        }
+        if (match.status == ExchangeStatus.CANCELLED) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                if (match.cancelledByMe == true) "내가 취소한 매칭이에요" else "상대방이 취소한 매칭이에요",
+                color = TextTertiary, fontSize = 11.sp
+            )
         }
 
         Spacer(Modifier.height(14.dp))
@@ -162,7 +268,7 @@ fun MatchCard(
                     tint = TextTertiary, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    if (lastMsg.senderId == 0) "나: ${lastMsg.text}" else "${match.partner.name}: ${lastMsg.text}",
+                    if (lastMsg.senderId == AppState.myUserId) "나: ${lastMsg.text}" else "${match.partner.name}: ${lastMsg.text}",
                     color = TextSecondary, fontSize = 11.sp, maxLines = 1, modifier = Modifier.weight(1f)
                 )
                 Text(lastMsg.timestamp, color = TextTertiary, fontSize = 9.sp)
@@ -175,23 +281,46 @@ fun MatchCard(
 
             ExchangeStatus.MATCHED -> {
                 Button(
-                    onClick  = { AppState.confirmExchange(match.id) },
+                    onClick  = {
+                        if (!match.myConfirmed) {
+                            AppState.confirmExchange(match.id) { result ->
+                                if (result is ConfirmResult.NeedsAddress) onNeedsAddress()
+                            }
+                        }
+                    },
+                    enabled  = !match.myConfirmed,
                     modifier = Modifier.fillMaxWidth().height(44.dp),
                     shape    = RoundedCornerShape(12.dp),
-                    colors   = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText)
+                    colors   = ButtonDefaults.buttonColors(
+                        containerColor = AccentYellow, contentColor = AccentYellowText,
+                        disabledContainerColor = BgCardDark, disabledContentColor = TextTertiary
+                    )
                 ) {
-                    Text("교환 확정하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                    Text(
+                        if (match.myConfirmed) "상대방 확인 대기 중" else "교환 확정하기",
+                        fontWeight = FontWeight.Black, fontSize = 14.sp
+                    )
                 }
                 Spacer(Modifier.height(6.dp))
-                OutlinedButton(
-                    onClick  = onOpenChat,
-                    modifier = Modifier.fillMaxWidth().height(40.dp),
-                    shape    = RoundedCornerShape(12.dp),
-                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
-                ) {
-                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("채팅하기", fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick  = onOpenChat,
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                    ) {
+                        Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("채팅하기", fontSize = 13.sp)
+                    }
+                    OutlinedButton(
+                        onClick  = onRequestCancel,
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.outlinedButtonColors(contentColor = PassColor)
+                    ) {
+                        Text("취소하기", fontSize = 13.sp)
+                    }
                 }
             }
 
@@ -210,31 +339,46 @@ fun MatchCard(
                     Text("배송 안내 보기", fontWeight = FontWeight.Black, fontSize = 14.sp)
                 }
                 Spacer(Modifier.height(6.dp))
-                OutlinedButton(
-                    onClick  = onOpenChat,
-                    modifier = Modifier.fillMaxWidth().height(40.dp),
-                    shape    = RoundedCornerShape(12.dp),
-                    colors   = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
-                ) {
-                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("채팅하기", fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(
+                        onClick  = onOpenChat,
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                    ) {
+                        Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("채팅하기", fontSize = 13.sp)
+                    }
+                    OutlinedButton(
+                        onClick  = onRequestCancel,
+                        modifier = Modifier.weight(1f).height(40.dp),
+                        shape    = RoundedCornerShape(12.dp),
+                        colors   = ButtonDefaults.outlinedButtonColors(contentColor = PassColor)
+                    ) {
+                        Text("취소하기", fontSize = 13.sp)
+                    }
                 }
             }
 
             ExchangeStatus.SHIPPING -> {
                 Button(
-                    onClick  = { AppState.completeExchange(match.id) },
+                    onClick  = { if (!match.myReceived) AppState.completeExchange(match.id) },
+                    enabled  = !match.myReceived,
                     modifier = Modifier.fillMaxWidth().height(44.dp),
                     shape    = RoundedCornerShape(12.dp),
                     colors   = ButtonDefaults.buttonColors(
                         containerColor = StatusComplete.copy(alpha = 0.15f),
-                        contentColor   = StatusComplete
+                        contentColor   = StatusComplete,
+                        disabledContainerColor = BgCardDark, disabledContentColor = TextTertiary
                     )
                 ) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("교환 완료", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                    Text(
+                        if (match.myReceived) "상대방 수령 대기 중" else "교환 완료(도착 확인)",
+                        fontWeight = FontWeight.Black, fontSize = 14.sp
+                    )
                 }
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(
@@ -261,6 +405,21 @@ fun MatchCard(
                         tint = StatusComplete, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("교환이 완료됐어요 🎉", color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            ExchangeStatus.CANCELLED -> {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(TextTertiary.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null,
+                        tint = TextTertiary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("취소된 매칭이에요", color = TextTertiary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
 

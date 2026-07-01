@@ -48,7 +48,7 @@ data class ChatMessage(
 )
 
 // ─────────────────────────────────────────────────────────────────────
-// 교환 상태 (5단계)
+// 교환 상태
 // ─────────────────────────────────────────────────────────────────────
 
 enum class ExchangeStatus(val label: String, val description: String) {
@@ -56,7 +56,8 @@ enum class ExchangeStatus(val label: String, val description: String) {
     MATCHED  ("교환 대기",    "서로 좋아요! 교환을 확정해보세요"),
     CONFIRMED("배송 준비 중", "교환이 확정됐어요. 배송 안내를 확인하세요"),
     SHIPPING ("배송 중",      "서로 배송이 시작됐어요"),
-    COMPLETE ("교환 완료",    "교환이 성공적으로 완료됐어요")
+    COMPLETE ("교환 완료",    "교환이 성공적으로 완료됐어요"),
+    CANCELLED("취소됨",       "매칭이 취소됐어요")
 }
 
 data class MatchItem(
@@ -68,8 +69,34 @@ data class MatchItem(
     val date: String,
     // ✅ MutableList → SnapshotStateList : Compose recomposition 즉시 반영
     val messages: SnapshotStateList<ChatMessage> = mutableStateListOf(),
-    val partnerAddress: String = "서울시 마포구 서교동 123-45, 203호"
+    // ⚠️ 상대방이 confirm 하기 전까진 서버가 이 필드 자체를 안 내려줌 (spec 10절)
+    val partnerAddress: String? = null,
+    // confirm/ship/complete 는 "양쪽이 각자 호출"해야 다음 단계로 넘어가는 방식이라
+    // 한쪽만 액션했을 때의 대기 상태를 UI에 보여주기 위한 플래그들
+    val myConfirmed: Boolean = false,
+    val theirConfirmed: Boolean = false,
+    val myShipped: Boolean = false,
+    val theirShipped: Boolean = false,
+    val myReceived: Boolean = false,
+    val theirReceived: Boolean = false,
+    // status == CANCELLED 일 때만 의미 있음 (true=내가 취소, false=상대방이 취소)
+    val cancelledByMe: Boolean? = null
 )
+
+// ─────────────────────────────────────────────────────────────────────
+// 배송 주소 (교환 confirm 시 상대방에게 노출됨)
+// ─────────────────────────────────────────────────────────────────────
+
+data class Address(
+    val id: Int,
+    val label: String,
+    val recipient: String,
+    val postalCode: String,
+    val address1: String,
+    val address2: String,
+    val isDefault: Boolean
+)
+
 
 // ─────────────────────────────────────────────────────────────────────
 // 좋아요 관계

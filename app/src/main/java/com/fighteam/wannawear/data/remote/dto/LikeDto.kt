@@ -3,17 +3,24 @@ package com.fighteam.wannawear.data.remote.dto
 data class LikeToggleResponse(
     val liked: Boolean = false,
     val matched: Boolean = false,
+    // matched=true 일 때만 존재 (id/status/partnerItem/myItem/partner 전부 타입화되어 옴)
     val exchange: ExchangeSummaryDto? = null
 )
 
-/**
- * ⚠️ /api/likes/sent, /api/likes/received 는 List<Map<String,Object>> 로만 노출되어
- * 정확한 키를 알 수 없음. item/user/likedAt 정도로 추정해서 매핑하고,
- * 실제 응답 확인 후 필드명이 다르면 이 클래스와 매퍼(Mappers.kt)만 손보면 됨.
- */
-data class LikeEntryDto(
-    val item: ItemResponse? = null,
+data class DislikeResponse(
+    val disliked: Boolean = false,
+    val alreadySwiped: Boolean? = null
+)
+
+/** GET /likes/received: [{ fromUser, toItem, likedAt }] */
+data class ReceivedLikeEntryDto(
     val fromUser: PublicUserResponse? = null,
-    val toUser: PublicUserResponse? = null,
+    val toItem: ItemResponse? = null,
+    val likedAt: String? = null
+)
+
+/** GET /likes/sent: [{ item, likedAt }] */
+data class SentLikeEntryDto(
+    val item: ItemResponse? = null,
     val likedAt: String? = null
 )

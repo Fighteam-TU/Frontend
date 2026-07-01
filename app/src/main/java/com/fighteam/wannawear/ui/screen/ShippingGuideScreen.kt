@@ -125,15 +125,22 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text("수취인 주소", color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text(match.partnerAddress, color = TextPrimary, fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold, lineHeight = 20.sp)
+                    Text(
+                        match.partnerAddress ?: "상대방이 확정하면 주소가 표시돼요",
+                        color = if (match.partnerAddress != null) TextPrimary else TextTertiary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold, lineHeight = 20.sp
+                    )
                     Spacer(Modifier.height(2.dp))
                     Text("수취인: ${match.partner.name}", color = TextSecondary, fontSize = 11.sp)
                 }
-                IconButton(onClick = {
-                    clipboard.setText(AnnotatedString(match.partnerAddress))
-                    copiedAddress = true
-                }) {
+                IconButton(
+                    enabled = match.partnerAddress != null,
+                    onClick = {
+                        match.partnerAddress?.let { clipboard.setText(AnnotatedString(it)) }
+                        copiedAddress = true
+                    }
+                ) {
                     Icon(
                         if (copiedAddress) Icons.Default.Check else Icons.Default.ContentCopy,
                         contentDescription = "주소 복사",

@@ -6,9 +6,16 @@ data class ExchangeResponse(
     val myItem: ItemResponse? = null,
     val theirItem: ItemResponse? = null,
     val partner: PublicUserResponse? = null,
+    // 상대방이 confirm 하기 전엔 서버가 이 필드 자체를 안 내려줌
     val partnerAddress: String? = null,
+    val myConfirmed: Boolean? = null,
+    val theirConfirmed: Boolean? = null,
     val myShipped: Boolean? = null,
     val theirShipped: Boolean? = null,
+    val myReceived: Boolean? = null,
+    val theirReceived: Boolean? = null,
+    // status == CANCELLED 일 때만 존재
+    val cancelledByMe: Boolean? = null,
     val lastMessage: LastMessageDto? = null,
     val matchedAt: String? = null
 )
@@ -18,15 +25,30 @@ data class LastMessageDto(
     val sentAt: String? = null
 )
 
-/** ⚠️ GET /api/exchanges 응답도 MapStringObject라 정확한 필드명 미확정 — exchanges 키로 추정 */
+/** GET /exchanges 응답: { exchanges, total } */
 data class ExchangeListEnvelope(
     val exchanges: List<ExchangeResponse> = emptyList(),
-    val total: Int? = null
+    val total: Long? = null
 )
 
-/** LikeToggleResponse.exchange 는 스펙상 필드 타입이 정의되지 않은 느슨한 객체라
- *  여기서는 최소 정보(id, status)만 우선 반영하고, 상세는 GET /api/exchanges/{id}로 재조회한다. */
+/** POST /likes/{itemId} 로 매칭이 성립했을 때 오는, 완전히 타입화된 요약 정보.
+ *  partnerItem = 상대가 낸 아이템(내가 받을 것), myItem = 내가 낸 아이템(상대가 받을 것). */
 data class ExchangeSummaryDto(
-    val id: Long? = null,
-    val status: String? = null
+    val id: Long,
+    val status: String? = null, // 항상 "MATCHED"
+    val partnerItem: ItemResponse? = null,
+    val myItem: ItemResponse? = null,
+    val partner: PublicUserResponse? = null
+)
+
+/** confirm/ship/complete/cancel 응답 공통 형태 — 액션별로 실제 오는 필드만 채워짐 */
+data class ExchangeActionResponse(
+    val exchangeId: Long? = null,
+    val status: String? = null,
+    val myConfirmed: Boolean? = null,
+    val theirConfirmed: Boolean? = null,
+    val myShipped: Boolean? = null,
+    val theirShipped: Boolean? = null,
+    val myReceived: Boolean? = null,
+    val theirReceived: Boolean? = null
 )
