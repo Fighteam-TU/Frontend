@@ -19,7 +19,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.fighteam.wannawear.data.remote.RetrofitClient
+import com.fighteam.wannawear.data.remote.TokenManager
+import com.fighteam.wannawear.data.remote.dto.ApiException
+import com.fighteam.wannawear.data.remote.dto.LoginRequest
+import com.fighteam.wannawear.data.remote.dto.RegisterRequest
 import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(onLoginSuccess: () -> Unit) {
@@ -27,14 +33,47 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
     var email       by remember { mutableStateOf("") }
     var password    by remember { mutableStateOf("") }
     var nickname    by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // ✅ 유효성 검사: 로그인은 이메일+비밀번호, 회원가입은 닉네임까지
     val isEmailValid    = email.contains("@") && email.contains(".")
     val isPasswordValid = password.length >= 6
-    val canProceed = if (isLoginMode) {
+    val canProceed = !isSubmitting && if (isLoginMode) {
         isEmailValid && isPasswordValid
     } else {
         isEmailValid && isPasswordValid && nickname.isNotBlank()
+    }
+
+    fun submit() {
+        if (!canProceed) return
+        isSubmitting = true
+        scope.launch {
+            try {
+                val auth = if (isLoginMode) {
+                    val res = RetrofitClient.api.login(LoginRequest(email.trim(), password))
+                    if (!res.success || res.data == null) throw ApiException(res.error)
+                    res.data
+                } else {
+                    val res = RetrofitClient.api.register(
+                        RegisterRequest(email = email.trim(), password = password, nickname = nickname.trim())
+                    )
+                    if (!res.success || res.data == null) throw ApiException(res.error)
+                    res.data
+                }
+                TokenManager.saveTokens(auth.accessToken, auth.refreshToken)
+                isSubmitting = false
+                onLoginSuccess()
+            } catch (e: Exception) {
+                isSubmitting = false
+                val message = (e as? ApiException)?.errorBody?.message
+                    ?: if (isLoginMode) "로그인에 실패했어요. 이메일/비밀번호를 확인해주세요."
+                       else "회원가입에 실패했어요. 잠시 후 다시 시도해주세요."
+                snackbarHostState.showSnackbar(message)
+            }
+        }
     }
 
     // 공통 입력 필드 색상
@@ -155,9 +194,9 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 )
             }
 
-            // ✅ canProceed 가 false면 버튼 비활성화
+            // ✅ canProceed 가 false면 버튼 비활성화, 제출 중엔 로딩 표시
             Button(
-                onClick  = { if (canProceed) onLoginSuccess() },
+                onClick  = { submit() },
                 enabled  = canProceed,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape    = RoundedCornerShape(12.dp),
@@ -168,11 +207,19 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     disabledContentColor   = TextTertiary
                 )
             ) {
-                Text(
-                    if (isLoginMode) "로그인" else "가입하고 시작하기",
-                    fontWeight = FontWeight.Black,
-                    fontSize   = 14.sp
-                )
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = AccentYellowText,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        if (isLoginMode) "로그인" else "가입하고 시작하기",
+                        fontWeight = FontWeight.Black,
+                        fontSize   = 14.sp
+                    )
+                }
             }
 
             // 구분선
@@ -182,10 +229,10 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 Divider(Modifier.weight(1f), color = BorderSubtle)
             }
 
-            // 소셜 버튼
+            // 소셜 버튼 — ⚠️ 카카오/Apple OAuth는 백엔드 미구현이라 임시로 안내만 띄움
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    onClick  = onLoginSuccess,
+                    onClick  = { scope.launch { snackbarHostState.showSnackbar("카카오 로그인은 아직 준비 중이에요") } },
                     modifier = Modifier.weight(1f).height(48.dp),
                     shape    = RoundedCornerShape(12.dp),
                     colors   = ButtonDefaults.buttonColors(containerColor = KakaoBg, contentColor = KakaoText)
@@ -193,7 +240,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     Text("💬  카카오", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
                 Button(
-                    onClick  = onLoginSuccess,
+                    onClick  = { scope.launch { snackbarHostState.showSnackbar("Apple 로그인은 아직 준비 중이에요") } },
                     modifier = Modifier.weight(1f).height(48.dp),
                     shape    = RoundedCornerShape(12.dp),
                     colors   = ButtonDefaults.buttonColors(containerColor = BgCard, contentColor = TextPrimary)
@@ -201,6 +248,18 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     Text("  Apple", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier  = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+        ) { data ->
+            Snackbar(
+                snackbarData   = data,
+                containerColor = BgCard,
+                contentColor   = TextPrimary,
+                shape          = RoundedCornerShape(12.dp)
+            )
         }
     }
 }

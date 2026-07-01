@@ -18,12 +18,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
-import com.fighteam.wannawear.data.model.DummyData
 import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.ui.theme.*
 
 @Composable
 fun ProfileScreen() {
+    val me = AppState.myProfile
     // #10: 하드코딩 제거 → AppState 실제 데이터 사용
     val completedCount by remember {
         derivedStateOf { AppState.matches.count { it.status == ExchangeStatus.COMPLETE } }
@@ -34,7 +34,7 @@ fun ProfileScreen() {
     // 매칭률 = 매칭 성사 수 / 내가 좋아요 보낸 수 (0이면 0%)
     val matchRate by remember {
         derivedStateOf {
-            val liked   = AppState.myLikes.size + AppState.matches.size
+            val liked   = AppState.sentLikes.size + AppState.matches.size
             val matched = AppState.matches.size
             if (liked == 0) 0 else (matched * 100 / liked)
         }
@@ -55,7 +55,7 @@ fun ProfileScreen() {
         ) {
             Box {
                 AsyncImage(
-                    model              = DummyData.me.avatar,
+                    model              = me?.avatar,
                     contentDescription = null,
                     modifier           = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)),
                     contentScale       = ContentScale.Crop
@@ -73,7 +73,7 @@ fun ProfileScreen() {
             }
             Spacer(Modifier.width(16.dp))
             Column {
-                Text(DummyData.me.name, color = TextPrimary, fontSize = 18.sp,
+                Text(me?.name ?: "...", color = TextPrimary, fontSize = 18.sp,
                     fontWeight = FontWeight.Black)
                 Text("서울 마포구", color = TextSecondary, fontSize = 11.sp)
                 Spacer(Modifier.height(6.dp))

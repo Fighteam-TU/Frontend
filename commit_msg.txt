@@ -1,0 +1,42 @@
+feat: 백엔드 실 서버 연동 (Retrofit + JWT 인증)
+
+스웨거(http://119.206.244.145:8080/v3/api-docs) 스펙 기준으로 실제 백엔드와 통신하도록
+Android 클라이언트를 연동. 지금까지 로컬 더미데이터로 시뮬레이션하던 발견/좋아요/매칭/채팅
+로직을 서버가 대신 처리하도록 전환.
+
+[네트워킹 기반]
+- Retrofit2 + OkHttp + Gson 추가, ApiService에 34개 엔드포인트 전체 매핑
+- TokenManager: accessToken/refreshToken SharedPreferences 저장
+- AuthInterceptor: 로그인/회원가입/토큰갱신 제외 모든 요청에 Bearer 헤더 자동 첨부
+- TokenAuthenticator: accessToken 만료(401) 시 refreshToken으로 자동 재발급 후 재시도,
+  refreshToken까지 만료되면 SessionEvents로 로그인 화면으로 강제 이동
+- network_security_config.xml: 서버가 아직 HTTPS가 아니라 해당 IP만 cleartext 허용
+
+[AppState 전면 재작성]
+- 로컬 시뮬레이션 매칭 로직(likeRecords 뒤져서 매칭 여부 직접 계산하던 부분) 전부 제거.
+  POST /api/likes/{itemId} 하나로 좋아요+매칭 판별을 서버가 처리하고 결과만 반영
+- "받은 관심"/"보낸 관심"을 ID로 여러 풀을 뒤져 아이템을 되찾는 방식(LikeRecord) 대신
+  서버가 준 실제 객체를 그대로 들고 있는 ReceivedLike/SentLike 모델로 교체
+  → 지난 세션들에서 반복됐던 "아이템을 못 찾아 누락되는" 버그 클래스를 구조적으로 제거
+- isItemInExchange/isItemCompleted 등은 실제 fetch된 매치 목록 기준으로 재계산
+- addMyItem/removeMyItem/likeItem/confirmExchange/startShipping/completeExchange/
+  sendMessage 모두 비동기 API 호출 + 콜백 방식으로 전환
+
+[화면 연동]
+- LoginScreen: 실제 로그인/회원가입 API 연동, 로딩 상태 및 에러 스낵바 추가
+  (카카오/Apple은 백엔드 미구현이라 안내만 표시)
+- NavGraph: refreshToken 보유 여부로 로그인 유지, 위치 권한 요청 후 초기 데이터 로드,
+  세션 만료 시 자동 로그인 화면 복귀
+- DiscoverScreen: 로컬 더미 풀/seenItemIds 로직 제거, 서버 발견 피드(GET /items/discover)
+  사용. 패스(왼쪽 스와이프)도 POST /likes/{id}/dislike로 서버에 기록
+- ClosetScreen: 받은/보낸 관심 탭을 ReceivedLike/SentLike 기반으로 재작성,
+  상대 옷장 다이얼로그는 비동기 로드로 전환
+- ChatScreen/ProfileScreen: DummyData.me 참조를 실제 로그인 사용자(AppState.myProfile)로 교체
+
+[알려진 제약 / TODO]
+- /items/discover, /items/me, /exchanges, /exchanges/{id}/messages, /likes/sent,
+  /likes/received 는 스웨거상 응답이 느슨한 MapStringObject/List<Map>이라 정확한
+  필드명이 스펙에 없음. Mappers.kt에 "가장 그럴듯한 키 이름"으로 추정해서 파싱하도록
+  주석을 남겨뒀음 — 실제 서버 응답 확인 후 필드명이 다르면 그 부분만 조정하면 됨
+- 카카오/Apple 소셜 로그인, 주소 관리 CRUD 화면, FCM 디바이스 토큰 등록은 API는 붙여뒀지만
+  아직 UI 연동 전

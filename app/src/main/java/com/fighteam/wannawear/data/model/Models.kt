@@ -81,6 +81,19 @@ data class LikeRecord(
     val toUserId: Int
 )
 
+// ⚠️ 백엔드 연동 이후 "받은 관심"/"보낸 관심"은 ID로 여러 풀을 뒤져서 아이템을
+//    되찾는 방식(LikeRecord) 대신, 서버가 내려준 실제 객체를 그대로 들고 있는
+//    방식으로 바꿨다. 예전에 반복해서 발생했던 "아이템을 못 찾아서 누락되는" 버그
+//    클래스 자체를 원천 차단하기 위함.
+data class ReceivedLike(
+    val fromUser: User,
+    val myItem: ClothingItem
+)
+
+data class SentLike(
+    val item: ClothingItem
+)
+
 // ─────────────────────────────────────────────────────────────────────
 // 더미 데이터
 // ─────────────────────────────────────────────────────────────────────

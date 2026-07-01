@@ -84,11 +84,11 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
             text  = { Text("\"${item.name}\"이(가) 옷장과 발견 탭에서 사라져요. 이 작업은 되돌릴 수 없어요.") },
             confirmButton = {
                 TextButton(onClick = {
-                    when (AppState.removeMyItem(item.id)) {
-                        is RemoveResult.BlockedInExchange ->
-                            deleteBlockedMessage = "이미 교환이 진행 중인 옷은 내릴 수 없어요. 매칭 탭에서 먼저 교환을 완료해주세요."
-                        else -> {
-                            detailItem = null
+                    AppState.removeMyItem(item.id) { result ->
+                        when (result) {
+                            is RemoveResult.BlockedInExchange ->
+                                deleteBlockedMessage = "이미 교환이 진행 중인 옷은 내릴 수 없어요. 매칭 탭에서 먼저 교환을 완료해주세요."
+                            else -> detailItem = null
                         }
                     }
                     deleteConfirmItem = null
@@ -116,12 +116,13 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
     detailItem?.let { item ->
         ItemDetailSheet(
             item             = item,
-            showLikeButton   = item.user.id != DummyData.me.id,
-            showDeleteButton = item.user.id == DummyData.me.id,
+            showLikeButton   = item.user.id != AppState.myUserId,
+            showDeleteButton = item.user.id == AppState.myUserId,
             onLike           = {
-                val result = AppState.likeItem(item)
-                if (result is MatchResult.Matched) matchedResult = result.match
-                detailItem = null
+                AppState.likeItem(item) { result ->
+                    if (result is MatchResult.Matched) matchedResult = result.match
+                    detailItem = null
+                }
             },
             onDelete  = { deleteConfirmItem = item },
             onDismiss = { detailItem = null }
@@ -158,10 +159,9 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
             ClosetTab.values().forEach { tab ->
                 val selected = selectedTab == tab
                 val badgeCount = when (tab) {
-                    // ✅ 실제 목록(ReceivedLikesTab)과 동일하게 완료된 교환 항목은 배지 카운트에서도 제외
-                    ClosetTab.RECEIVED_LIKES -> AppState.getLikesOnMyItems()
-                        .count { !AppState.isItemCompleted(it.toItemId) }
-                    ClosetTab.MY_LIKES       -> AppState.myLikes.size
+                    ClosetTab.RECEIVED_LIKES -> AppState.receivedLikes
+                        .count { !AppState.isItemCompleted(it.myItem.id) }
+                    ClosetTab.MY_LIKES       -> AppState.sentLikes.size
                     else                     -> 0
                 }
                 Button(
@@ -203,9 +203,10 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
             )
             ClosetTab.MY_LIKES       -> MyLikesTab(
                 onShowDetail = { detailItem = it },
-                onLike       = {
-                    val result = AppState.likeItem(it)
-                    if (result is MatchResult.Matched) matchedResult = result.match
+                onLike       = { item ->
+                    AppState.likeItem(item) { result ->
+                        if (result is MatchResult.Matched) matchedResult = result.match
+                    }
                 }
             )
         }
@@ -218,7 +219,14 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
 
 @Composable
 private fun MyClosetTab(onNavigateToAdd: () -> Unit, onShowDetail: (ClothingItem) -> Unit) {
-    val items = AppState.myCloset   // 교환완료 시 completeExchange()에서 이미 제거됨
+    val items = AppState.myCloset
+
+    if (AppState.isLoading && items.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = AccentYellow)
+        }
+        return
+    }
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -260,8 +268,7 @@ private fun ReceivedLikesTab(
     onShowDetail: (ClothingItem) -> Unit
 ) {
     // 교환완료된 내 아이템 관련 기록은 숨김
-    val likes = AppState.getLikesOnMyItems()
-        .filter { !AppState.isItemCompleted(it.toItemId) }
+    val likes = AppState.receivedLikes.filter { !AppState.isItemCompleted(it.myItem.id) }
 
     if (likes.isEmpty()) {
         EmptyState("💛", "아직 받은 관심이 없어요", "옷을 더 등록해보세요!")
@@ -273,16 +280,14 @@ private fun ReceivedLikesTab(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        items(likes) { like ->
-            val fromUser   = DummyData.users.firstOrNull { it.id == like.fromUserId } ?: return@items
-            val myItem     = AppState.myCloset.firstOrNull { it.id == like.toItemId } ?: return@items
-            val inExchange by remember { derivedStateOf { AppState.isItemInExchange(myItem.id) } }
+        items(likes, key = { "${it.fromUser.id}-${it.myItem.id}" }) { like ->
+            val inExchange by remember { derivedStateOf { AppState.isItemInExchange(like.myItem.id) } }
             ReceivedLikeCard(
-                fromUser     = fromUser,
-                myItem       = myItem,
+                fromUser     = like.fromUser,
+                myItem       = like.myItem,
                 inExchange   = inExchange,
-                onViewCloset = { onViewUserCloset(fromUser) },
-                onShowDetail = { onShowDetail(myItem) }
+                onViewCloset = { onViewUserCloset(like.fromUser) },
+                onShowDetail = { onShowDetail(like.myItem) }
             )
         }
     }
@@ -349,10 +354,9 @@ private fun MyLikesTab(
     onLike: (ClothingItem) -> Unit
 ) {
     // 교환완료된 상대 아이템은 숨김
-    val myLikes = AppState.myLikes
-        .filter { !AppState.isTheirItemCompleted(it.toItemId) }
+    val likes = AppState.sentLikes.filter { !AppState.isTheirItemCompleted(it.item.id) }
 
-    if (myLikes.isEmpty()) {
+    if (likes.isEmpty()) {
         EmptyState("🤍", "아직 관심 표시한 옷이 없어요", "발견 탭에서 마음에 드는 옷을 찾아보세요")
         return
     }
@@ -364,11 +368,9 @@ private fun MyLikesTab(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement   = Arrangement.spacedBy(10.dp)
     ) {
-        items(myLikes, key = { it.toItemId }) { like ->
-            // ✅ 발견 풀(allDiscoverItems)뿐 아니라 매치에만 존재하는 아이템도 찾는
-            //    findClothingItemById 사용 — 안 그러면 이미 매칭된 옷이 누락될 수 있음
-            val item = AppState.findClothingItemById(like.toItemId) ?: return@items
-            val alreadyLiked by remember { derivedStateOf { AppState.myLikes.any { it.toItemId == item.id } } }
+        items(likes, key = { it.item.id }) { like ->
+            val item = like.item
+            val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
             val inExchange by remember {
                 derivedStateOf {
                     AppState.matches.any { m ->
@@ -481,7 +483,7 @@ fun ItemDetailSheet(
     showDeleteButton: Boolean = false,
     onDelete: () -> Unit = {}
 ) {
-    val alreadyLiked by remember { derivedStateOf { AppState.myLikes.any { it.toItemId == item.id } } }
+    val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -625,7 +627,16 @@ fun UserClosetDialog(
     onMatched: (MatchItem) -> Unit,
     onShowDetail: (ClothingItem) -> Unit
 ) {
-    val theirItems = AppState.getUserCloset(user.id)
+    var theirItems by remember { mutableStateOf<List<ClothingItem>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(user.id) {
+        loading = true
+        AppState.loadUserCloset(user.id) { items ->
+            theirItems = items
+            loading = false
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().background(BgCard, RoundedCornerShape(20.dp)).padding(20.dp)) {
@@ -642,6 +653,13 @@ fun UserClosetDialog(
             }
             Spacer(Modifier.height(14.dp))
 
+            if (loading) {
+                Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AccentYellow)
+                }
+                return@Column
+            }
+
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 modifier = Modifier.height(380.dp),
@@ -649,7 +667,7 @@ fun UserClosetDialog(
                 verticalArrangement   = Arrangement.spacedBy(8.dp)
             ) {
                 items(theirItems, key = { it.id }) { item ->
-                    val alreadyLiked by remember { derivedStateOf { AppState.myLikes.any { it.toItemId == item.id } } }
+                    val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
                     val inExchange by remember {
                         derivedStateOf {
                             AppState.matches.any { m ->
@@ -663,8 +681,9 @@ fun UserClosetDialog(
                         inExchange   = inExchange,
                         onClick      = { onShowDetail(item) },
                         onLike       = {
-                            val result = AppState.likeItem(item)
-                            if (result is MatchResult.Matched) onMatched(result.match)
+                            AppState.likeItem(item) { result ->
+                                if (result is MatchResult.Matched) onMatched(result.match)
+                            }
                         }
                     )
                 }

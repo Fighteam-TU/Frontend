@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,41 +28,28 @@ import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.MatchResult
 import com.fighteam.wannawear.data.model.ClothingItem
-import com.fighteam.wannawear.data.model.DummyData
 import com.fighteam.wannawear.data.model.MatchItem
+import com.fighteam.wannawear.data.remote.LocationProvider
 import com.fighteam.wannawear.ui.theme.*
 import kotlin.math.abs
 import kotlinx.coroutines.launch
-
-// 이미 본 아이템 ID 추적 (앱 세션 내)
-private val seenItemIds = mutableSetOf<Int>()
-
-/** 좋아요 안 한 + 아직 안 본 아이템 우선으로 새 덱 반환 */
-private fun buildFreshDeck(): List<ClothingItem> {
-    val likedIds = AppState.myLikes.map { it.toItemId }.toSet()
-    // ✅ DummyData.allDiscoverItems 사용 — discoverItems + extraDiscoverItems 통합 소스
-    //    (분리된 풀을 쓰면 "보낸 관심" 등에서 아이템을 못 찾는 문제가 있었음)
-    val allPool  = DummyData.allDiscoverItems
-
-    // 1순위: 안 보고 + 좋아요 안 한 것
-    val unseen   = allPool.filter { it.id !in seenItemIds && it.id !in likedIds }
-    // 2순위: 봤지만 좋아요 안 한 것
-    val seenOnly = allPool.filter { it.id in seenItemIds && it.id !in likedIds }
-
-    val result = (unseen + seenOnly).take(8).shuffled()
-
-    // 새 덱에 포함된 것들을 seen에 추가
-    result.forEach { seenItemIds.add(it.id) }
-    return result
-}
 
 @Composable
 fun DiscoverScreen() {
     val cards = AppState.discoverCards
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
+    val context = LocalContext.current
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    // 최초 진입 시 발견 덱이 비어있으면(로그인 직후 위치 못 구했던 경우 등) 한 번 더 로드 시도
+    LaunchedEffect(Unit) {
+        if (cards.isEmpty() && !AppState.isLoading) {
+            val (lat, lng) = LocationProvider.getCurrentLatLng(context)
+            AppState.refreshDiscoverFeed(lat, lng)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(BgPrimary)) {
         Column(Modifier.fillMaxSize()) {
@@ -96,7 +84,9 @@ fun DiscoverScreen() {
                 Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
                 contentAlignment = Alignment.Center
             ) {
-                if (cards.isEmpty()) {
+                if (AppState.isLoading && cards.isEmpty()) {
+                    CircularProgressIndicator(color = AccentYellow)
+                } else if (cards.isEmpty()) {
                     // 빈 상태 — 새 아이템 보기 버튼
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -109,9 +99,10 @@ fun DiscoverScreen() {
                             color = TextSecondary, fontSize = 13.sp)
                         Button(
                             onClick = {
-                                val fresh = buildFreshDeck()
-                                AppState.discoverCards.clear()
-                                AppState.discoverCards.addAll(fresh)
+                                scope.launch {
+                                    val (lat, lng) = LocationProvider.getCurrentLatLng(context)
+                                    AppState.refreshDiscoverFeed(lat, lng)
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = AccentYellow,
@@ -126,9 +117,8 @@ fun DiscoverScreen() {
                         }
                     }
                 } else {
-                    // ✅ 3장 고정 계산(2 - revIdx) 대신 실제 표시 개수 기준으로 stackIdx 계산.
-                    //    카드가 3장 미만으로 줄어들면(마지막 1~2장) 예전 방식은 stackIdx==0인
-                    //    카드가 없어서 맨 위 카드가 isTop=false가 되어 스와이프가 먹지 않았음.
+                    // ✅ 고정 3장 기준(2 - revIdx) 대신 실제 표시 개수 기준으로 stackIdx 계산.
+                    //    덱이 3장 미만으로 줄어도(마지막 1~2장) top 카드가 정확히 지정되어 스와이프가 계속 먹는다.
                     val visible = cards.take(3)
                     visible.reversed().forEachIndexed { revIdx, item ->
                         val stackIdx = (visible.size - 1) - revIdx
@@ -139,13 +129,13 @@ fun DiscoverScreen() {
                             isTop      = isTop,
                             onSwiped   = { isLike ->
                                 val top = cards.firstOrNull() ?: return@SwipeCard
-                                seenItemIds.add(top.id)
                                 cards.removeAt(0)
                                 if (isLike) {
-                                    val result = AppState.likeItem(top)
-                                    if (result is MatchResult.Matched) {
-                                        matchedResult = result.match
+                                    AppState.likeItem(top) { result ->
+                                        if (result is MatchResult.Matched) matchedResult = result.match
                                     }
+                                } else {
+                                    AppState.passItem(top.id)
                                 }
                             }
                         )
@@ -164,8 +154,8 @@ fun DiscoverScreen() {
                     IconButton(
                         onClick = {
                             val top = cards.firstOrNull() ?: return@IconButton
-                            seenItemIds.add(top.id)
                             cards.removeAt(0)
+                            AppState.passItem(top.id)
                         },
                         modifier = Modifier.size(52.dp).background(BgCardDark, CircleShape)
                     ) {
@@ -175,15 +165,14 @@ fun DiscoverScreen() {
 
                     Spacer(Modifier.width(20.dp))
 
-                    // 새 아이템 보기 (Refresh → 새 아이템)
+                    // 새 아이템 보기
                     IconButton(onClick = {
-                        val fresh = buildFreshDeck()
-                        AppState.discoverCards.clear()
-                        AppState.discoverCards.addAll(fresh)
                         scope.launch {
+                            val (lat, lng) = LocationProvider.getCurrentLatLng(context)
+                            AppState.refreshDiscoverFeed(lat, lng)
                             snackbarHostState.showSnackbar(
-                                message    = "좋아요 안 한 새 아이템을 불러왔어요 ✨",
-                                duration   = SnackbarDuration.Short
+                                message  = "새 아이템을 불러왔어요 ✨",
+                                duration = SnackbarDuration.Short
                             )
                         }
                     }) {
@@ -197,11 +186,9 @@ fun DiscoverScreen() {
                     IconButton(
                         onClick = {
                             val top = cards.firstOrNull() ?: return@IconButton
-                            seenItemIds.add(top.id)
                             cards.removeAt(0)
-                            val result = AppState.likeItem(top)
-                            if (result is MatchResult.Matched) {
-                                matchedResult = result.match
+                            AppState.likeItem(top) { result ->
+                                if (result is MatchResult.Matched) matchedResult = result.match
                             }
                         },
                         modifier = Modifier.size(52.dp).background(AccentYellow, CircleShape)
@@ -232,7 +219,6 @@ fun DiscoverScreen() {
                 match   = match,
                 onClose = {
                     matchedResult = null
-                    // #8 팝업 닫을 때 안내 스낵바
                     scope.launch {
                         snackbarHostState.showSnackbar(
                             message  = "매칭 내역은 매칭 탭에서 확인하세요 💛",
@@ -246,7 +232,7 @@ fun DiscoverScreen() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// SwipeCard — detectHorizontalDragGestures (#1 수정)
+// SwipeCard
 // ─────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -275,7 +261,6 @@ fun SwipeCard(
             .background(BgCard)
             .then(
                 if (isTop) Modifier.pointerInput(Unit) {
-                    // #1: detectHorizontalDragGestures 로 교체 → x축만 정확하게 추적
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { _, dragAmount -> offsetX += dragAmount },
                         onDragEnd = {
@@ -489,7 +474,6 @@ fun RealMatchPopup(match: MatchItem, onClose: () -> Unit) {
                 Text("교환 확정하기", fontWeight = FontWeight.Black, fontSize = 15.sp)
             }
             Spacer(Modifier.height(8.dp))
-            // #8: "나중에 결정하기" 누르면 onClose() → DiscoverScreen에서 스낵바 표시
             TextButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
                 Text("나중에 결정하기", color = TextTertiary)
             }

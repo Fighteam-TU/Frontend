@@ -61,7 +61,7 @@ fun AddItemScreen(onBack: () -> Unit) {
                 onClick = {
                     if (canSave) {
                         val newItem = ClothingItem(
-                            id = (AppState.myCloset.maxOfOrNull { it.id } ?: 1000) + 1, // #4 오버플로 방지
+                            id = 0, // 서버가 실제 id를 부여함 (요청 바디엔 안 쓰임)
                             image = photoUrl.ifBlank { "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=200&h=260&fit=crop" },
                             wearingImage = wearingUrl,
                             name = name,
@@ -71,12 +71,13 @@ fun AddItemScreen(onBack: () -> Unit) {
                             condition = selectedCondition,
                             category = selectedCategory ?: ClothingCategory.OTHER,
                             description = description,
-                            user = DummyData.me,
+                            user = AppState.myProfile ?: DummyData.me,
                             tags = tags,
                             isListed = true
                         )
-                        AppState.addMyItem(newItem)
-                        onBack()
+                        AppState.addMyItem(newItem) { success ->
+                            if (success) onBack()
+                        }
                     }
                 },
                 enabled = canSave,
