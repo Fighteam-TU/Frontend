@@ -62,11 +62,14 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
 
     // ⚠️ 이 앱엔 옷장/매칭 관련 실시간 소켓·푸시가 없어서, "탭을 바꿀 때마다 조용히 새로고침"이
     //    최소한의 동기화 수단이다. 당겨서 새로고침(pull-to-refresh)은 각 탭 내부에도 별도로 있음.
+    //    매칭(matches)을 먼저 최신화해야 "완료된 옷" 판정이 낡은 데이터로 되는 걸 막을 수 있어서
+    //    순서대로(매칭 → 해당 탭 데이터) 불러온다.
     LaunchedEffect(selectedTab) {
+        runCatching { AppState.loadExchanges() }
         when (selectedTab) {
-            ClosetTab.MY_CLOSET      -> AppState.refreshMyCloset()
-            ClosetTab.RECEIVED_LIKES -> AppState.refreshReceivedLikes()
-            ClosetTab.MY_LIKES       -> AppState.refreshSentLikes()
+            ClosetTab.MY_CLOSET      -> runCatching { AppState.loadMyCloset() }
+            ClosetTab.RECEIVED_LIKES -> runCatching { AppState.loadReceivedLikes() }
+            ClosetTab.MY_LIKES       -> runCatching { AppState.loadSentLikes() }
         }
     }
 
@@ -491,7 +494,9 @@ fun ClosetItemCard(
         Column {
             Box(Modifier.fillMaxWidth().height(152.dp)) {
                 AsyncImage(item.image, item.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                if (item.isListed || inExchange) {
+                // ⚠️ item.isListed는 서버 ItemResponse에 없는 필드라 클라이언트에서 항상 true로
+                //    채워져 있음 — 뱃지 판정에 쓰면 안 됨. 실제 교환 진행 여부(matches 기준)만 본다.
+                if (inExchange) {
                     Text(
                         "교환중", color = AccentYellowText, fontSize = 9.sp, fontWeight = FontWeight.Black,
                         modifier = Modifier.padding(8.dp)
@@ -755,6 +760,8 @@ fun CombinedInterestedClosetDialog(
     val failedUsers = fromUsers.filter { itemsByUser.containsKey(it.id) && itemsByUser[it.id] == null }
     val combinedItems = remember(itemsByUser, filterUserId) {
         itemsByUser.values.filterNotNull().flatten()
+            // ⚠️ 이미 나와 교환 완료된 아이템은 다시 좋아요 보낼 수 있는 것처럼 보이면 안 됨
+            .filterNot { AppState.isTheirItemCompleted(it.id) }
             .filter { filterUserId == null || it.user.id == filterUserId }
     }
 

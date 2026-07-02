@@ -127,8 +127,19 @@ object AppState {
 
     suspend fun loadMyCloset() {
         val res = apiCallRequired { api.getMyItems() }
+        // ⚠️ 서버 /api/items/me?status=all 은 이미 교환 완료(exchanged)된 아이템도 섞어서 줄 수 있고,
+        //    ItemResponse엔 그걸 구분할 필드 자체가 없다. 그래서 내가 아는 매칭 정보(COMPLETE 상태)
+        //    기준으로 이미 나간 옷은 옷장에서 걸러낸다 — 안 그러면 완료된 옷이 다시 "교환중"으로
+        //    남아있는 것처럼 보이고, 심지어 그 옷으로 또 매칭이 생기는 버그로 이어진다.
+        val completedMyItemIds = matches
+            .filter { it.status == ExchangeStatus.COMPLETE }
+            .map { it.myItem.id }
+            .toSet()
         myCloset.clear()
-        myCloset.addAll(res.items.map { it.toClothingItem(fallbackUser = myProfile) })
+        myCloset.addAll(
+            res.items.map { it.toClothingItem(fallbackUser = myProfile) }
+                .filterNot { it.id in completedMyItemIds }
+        )
     }
 
     /** category: TOP/BOTTOM/OUTER/DRESS/SHOES 등 자유 문자열, null이면 전체 */
