@@ -1,6 +1,7 @@
 package com.fighteam.wannawear.ui.navigation
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -85,8 +86,31 @@ fun WannaWearNavGraph() {
         RealMatchPopup(match = match, onClose = { delayedMatchNotification = null })
     }
 
+    // ⚠️ AppState.errorMessage는 여러 액션(확정/배송/취소/평점 등) 실패 시 여기 저장만 되고
+    //    화면에 표시하는 곳이 어디에도 없었음 — 그래서 진짜 네트워크 에러가 나도 사용자는
+    //    아무 반응도 못 보고 "버튼이 안 먹는다"고 느낄 수 있었음. 앱 전체를 감싸는 이 레벨에
+    //    스낵바 하나로 어디서 발생한 에러든 공통으로 보여준다.
+    val globalSnackbarHostState = remember { SnackbarHostState() }
+    val currentError = AppState.errorMessage
+    LaunchedEffect(currentError) {
+        if (currentError != null) {
+            globalSnackbarHostState.showSnackbar(currentError)
+            AppState.errorMessage = null
+        }
+    }
+
     Scaffold(
         containerColor = BgPrimary,
+        snackbarHost = {
+            SnackbarHost(globalSnackbarHostState) { data ->
+                Snackbar(
+                    snackbarData   = data,
+                    containerColor = BgCard,
+                    contentColor   = TextPrimary,
+                    shape          = RoundedCornerShape(12.dp)
+                )
+            }
+        },
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar(
