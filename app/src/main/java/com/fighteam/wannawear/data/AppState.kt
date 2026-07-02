@@ -102,8 +102,6 @@ object AppState {
                 launch { runCatching { loadSentLikes() } }
                 launch { runCatching { loadAddresses() } }
             }
-            // ⚠️ 테스트용 목업 — MockTestData.kt의 ENABLE_MOCK_TEST_DATA를 false로 바꾸면 꺼짐
-            if (ENABLE_MOCK_TEST_DATA) seedMockTestData()
             // 로그인 전에 FCM 토큰이 먼저 발급됐을 수 있어서, 로그인 성공 시점에 한 번 더 등록 시도
             TokenManager.deviceToken?.let { registerDeviceToken(it) }
             refreshUnreadNotificationCount()
@@ -212,16 +210,6 @@ object AppState {
         addresses.addAll(res.map { it.toAddress() })
     }
 
-    /** 목업 데이터를 발견 탭/받은 관심 탭에 살짝 섞어 넣는다. 이미 들어가 있으면 중복 추가 안 함. */
-    private fun seedMockTestData() {
-        val newDiscover = mockDiscoverItems.filter { mock -> discoverCards.none { it.id == mock.id } }
-        discoverCards.addAll(newDiscover)
-        val newLikes = mockReceivedLikes(myProfile).filter { mock ->
-            receivedLikes.none { it.fromUser.id == mock.fromUser.id && it.myItem.id == mock.myItem.id }
-        }
-        receivedLikes.addAll(0, newLikes)
-    }
-
     fun loadMessages(matchId: Int) {
         val match = matches.firstOrNull { it.id == matchId } ?: return
         scope.launch {
@@ -272,12 +260,6 @@ object AppState {
     }
 
     fun removeMyItem(itemId: Int, onResult: (RemoveResult) -> Unit) {
-        if (itemId < 0) { // 목업 "내 옷"은 로컬에서만 지운다
-            myCloset.removeAll { it.id == itemId }
-            receivedLikes.removeAll { it.myItem.id == itemId }
-            onResult(RemoveResult.Removed)
-            return
-        }
         scope.launch {
             try {
                 apiCall { api.deleteItem(itemId.toLong()) }
@@ -300,13 +282,6 @@ object AppState {
 
     // ── 좋아요 / 패스 ─────────────────────────────────────────────────
     fun likeItem(targetItem: ClothingItem, onResult: (MatchResult) -> Unit = {}) {
-        // ⚠️ 목업 아이템(id<0)은 서버에 없는 가짜 데이터라 로컬에서만 흉내낸다 (매칭은 발생 안 함)
-        if (targetItem.id < 0) {
-            if (sentLikes.none { it.item.id == targetItem.id }) sentLikes.add(0, SentLike(targetItem))
-            discoverCards.removeAll { it.id == targetItem.id }
-            onResult(MatchResult.Liked)
-            return
-        }
         scope.launch {
             try {
                 val res = apiCallRequired { api.toggleLike(targetItem.id.toLong()) }
@@ -343,7 +318,6 @@ object AppState {
 
     /** 발견 탭 패스(왼쪽 스와이프/X버튼) — 서버에 기록해서 다음 discover 조회부터 제외되게 함 */
     fun passItem(itemId: Int) {
-        if (itemId < 0) return // 목업 아이템은 서버에 기록할 필요 없음
         scope.launch {
             try {
                 apiCall { api.dislikeItem(itemId.toLong()) }
@@ -650,10 +624,6 @@ object AppState {
     // ⚠️ 반환값 null = 불러오기 실패(네트워크/서버 에러), emptyList() = 진짜로 옷장이 비어있음.
     //    예전엔 실패도 emptyList()로 뭉뚱그려서 "옷장이 비어있다"고 잘못 보이는 문제가 있었음.
     fun loadUserCloset(userId: Int, onResult: (List<ClothingItem>?) -> Unit) {
-        if (userId < 0) { // 목업 유저는 서버에 없으니 목업 아이템 중에서만 필터링
-            onResult(mockDiscoverItems.filter { it.user.id == userId })
-            return
-        }
         scope.launch {
             try {
                 val res = apiCallRequired { api.getUserCloset(userId.toLong()) }
