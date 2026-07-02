@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,10 +33,12 @@ import com.fighteam.wannawear.ui.theme.*
 import kotlin.math.abs
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverScreen() {
     val cards = AppState.discoverCards
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -80,6 +83,18 @@ fun DiscoverScreen() {
                 Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
                 contentAlignment = Alignment.Center
             ) {
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = {
+                        scope.launch {
+                            isRefreshing = true
+                            runCatching { AppState.loadDiscoverFeed() }
+                            isRefreshing = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (AppState.isLoading && cards.isEmpty()) {
                     CircularProgressIndicator(color = AccentYellow)
                 } else if (cards.isEmpty()) {
@@ -133,6 +148,8 @@ fun DiscoverScreen() {
                             }
                         )
                     }
+                }
+                }
                 }
             }
 

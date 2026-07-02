@@ -9,10 +9,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,7 +25,26 @@ import com.fighteam.wannawear.data.ConfirmResult
 import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.data.model.MatchItem
 import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.launch
 
+// 교환신청 전(매칭됨) / 진행중(배송) / 완료 / 취소 느낌으로 묶어서 볼 수 있게 하는 필터
+private enum class MatchFilter(val label: String) {
+    ALL("전체"),
+    MATCHED("교환신청 전"),
+    IN_PROGRESS("배송중"),
+    COMPLETE("교환 완료"),
+    CANCELLED("취소")
+}
+
+private fun MatchItem.matchesFilter(filter: MatchFilter): Boolean = when (filter) {
+    MatchFilter.ALL         -> true
+    MatchFilter.MATCHED     -> status == ExchangeStatus.MATCHED
+    MatchFilter.IN_PROGRESS -> status == ExchangeStatus.CONFIRMED || status == ExchangeStatus.SHIPPING
+    MatchFilter.COMPLETE    -> status == ExchangeStatus.COMPLETE
+    MatchFilter.CANCELLED   -> status == ExchangeStatus.CANCELLED
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MatchesScreen(
     onOpenChat:          (Int) -> Unit = {},
@@ -33,6 +54,17 @@ fun MatchesScreen(
     // ⚠️ confirm 하려면 본인 기본 배송주소가 있어야 함(API_SPEC 6절) — 없으면 이 다이얼로그로 유도
     var addressPromptMatchId by remember { mutableStateOf<Int?>(null) }
     var cancelConfirmMatchId by remember { mutableStateOf<Int?>(null) }
+    var selectedFilter by remember { mutableStateOf(MatchFilter.ALL) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // ⚠️ 매칭/교환 상태는 실시간 소켓이 없어서, 이 탭에 들어올 때마다 조용히 한 번 새로고침한다
+    // (당겨서 새로고침은 아래 PullToRefreshBox로 별도 제공).
+    LaunchedEffect(Unit) { AppState.refreshExchanges() }
+
+    val filteredMatches = remember(matches, selectedFilter) {
+        matches.filter { it.matchesFilter(selectedFilter) }
+    }
 
     addressPromptMatchId?.let { matchId ->
         AddressPromptDialog(
@@ -68,19 +100,74 @@ fun MatchesScreen(
             Text("교환 내역", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
             Text("총 ${matches.size}건", color = TextSecondary, fontSize = 10.sp)
         }
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding      = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+
+        // 상태별 필터 탭
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                .background(BgCard, RoundedCornerShape(12.dp))
+                .padding(4.dp)
         ) {
-            items(matches, key = { it.id }) { match ->
-                MatchCard(
-                    match               = match,
-                    onOpenChat          = { onOpenChat(match.id) },
-                    onOpenShippingGuide = { onOpenShippingGuide(match.id) },
-                    onNeedsAddress      = { addressPromptMatchId = match.id },
-                    onRequestCancel     = { cancelConfirmMatchId = match.id }
-                )
+            MatchFilter.values().forEach { filter ->
+                val selected = selectedFilter == filter
+                Button(
+                    onClick = { selectedFilter = filter },
+                    modifier = Modifier.weight(1f).height(34.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (selected) AccentYellow else Color.Transparent,
+                        contentColor   = if (selected) AccentYellowText else TextSecondary
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(0.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp)
+                ) {
+                    Text(
+                        filter.label,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 10.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                scope.launch {
+                    isRefreshing = true
+                    runCatching { AppState.loadExchanges() }
+                    isRefreshing = false
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (filteredMatches.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("📭", fontSize = 32.sp)
+                        Text(
+                            if (selectedFilter == MatchFilter.ALL) "아직 교환 내역이 없어요" else "해당하는 교환 내역이 없어요",
+                            color = TextSecondary, fontSize = 13.sp
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding      = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(filteredMatches, key = { it.id }) { match ->
+                        MatchCard(
+                            match               = match,
+                            onOpenChat          = { onOpenChat(match.id) },
+                            onOpenShippingGuide = { onOpenShippingGuide(match.id) },
+                            onNeedsAddress      = { addressPromptMatchId = match.id },
+                            onRequestCancel     = { cancelConfirmMatchId = match.id }
+                        )
+                    }
+                }
             }
         }
     }

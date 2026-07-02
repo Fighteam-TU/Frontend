@@ -149,6 +149,13 @@ object AppState {
         }
     }
 
+    // ⚠️ 실시간 소켓/푸시가 없는 화면(매칭/옷장 등)의 최소한의 "새로고침" 수단.
+    //    탭 전환 시(LaunchedEffect) 조용히 호출 — 실패해도 화면은 그냥 이전 데이터 유지.
+    fun refreshExchanges()     { scope.launch { runCatching { loadExchanges() } } }
+    fun refreshMyCloset()      { scope.launch { runCatching { loadMyCloset() } } }
+    fun refreshReceivedLikes() { scope.launch { runCatching { loadReceivedLikes() } } }
+    fun refreshSentLikes()     { scope.launch { runCatching { loadSentLikes() } } }
+
     suspend fun loadExchanges() {
         val res = apiCallRequired { api.getExchanges() }
         matches.clear()
@@ -467,7 +474,9 @@ object AppState {
         status == ExchangeStatus.SHIPPING
 
     // ── 상대 옷장 조회 (다이얼로그 열 때 비동기 로드) ───────────────────
-    fun loadUserCloset(userId: Int, onResult: (List<ClothingItem>) -> Unit) {
+    // ⚠️ 반환값 null = 불러오기 실패(네트워크/서버 에러), emptyList() = 진짜로 옷장이 비어있음.
+    //    예전엔 실패도 emptyList()로 뭉뚱그려서 "옷장이 비어있다"고 잘못 보이는 문제가 있었음.
+    fun loadUserCloset(userId: Int, onResult: (List<ClothingItem>?) -> Unit) {
         if (userId < 0) { // 목업 유저는 서버에 없으니 목업 아이템 중에서만 필터링
             onResult(mockDiscoverItems.filter { it.user.id == userId })
             return
@@ -478,7 +487,7 @@ object AppState {
                 onResult(res.items.map { it.toClothingItem() })
             } catch (e: Exception) {
                 errorMessage = e.message
-                onResult(emptyList())
+                onResult(null)
             }
         }
     }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,7 @@ import com.fighteam.wannawear.data.MatchResult
 import com.fighteam.wannawear.data.RemoveResult
 import com.fighteam.wannawear.data.model.*
 import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────
 // 탭 정의
@@ -57,6 +59,16 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
     var deleteConfirmItem by remember { mutableStateOf<ClothingItem?>(null) }
     var deleteBlockedMessage by remember { mutableStateOf<String?>(null) }
+
+    // ⚠️ 이 앱엔 옷장/매칭 관련 실시간 소켓·푸시가 없어서, "탭을 바꿀 때마다 조용히 새로고침"이
+    //    최소한의 동기화 수단이다. 당겨서 새로고침(pull-to-refresh)은 각 탭 내부에도 별도로 있음.
+    LaunchedEffect(selectedTab) {
+        when (selectedTab) {
+            ClosetTab.MY_CLOSET      -> AppState.refreshMyCloset()
+            ClosetTab.RECEIVED_LIKES -> AppState.refreshReceivedLikes()
+            ClosetTab.MY_LIKES       -> AppState.refreshSentLikes()
+        }
+    }
 
     // 매치 팝업 (최우선)
     matchedResult?.let { match ->
@@ -219,41 +231,55 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
 // 탭1: 내 옷장
 // ─────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MyClosetTab(onNavigateToAdd: () -> Unit, onShowDetail: (ClothingItem) -> Unit) {
     val items = AppState.myCloset
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    if (AppState.isLoading && items.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = AccentYellow)
-        }
-        return
-    }
-
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement   = Arrangement.spacedBy(10.dp)
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            scope.launch {
+                isRefreshing = true
+                runCatching { AppState.loadMyCloset() }
+                isRefreshing = false
+            }
+        },
+        modifier = Modifier.fillMaxSize()
     ) {
-        items(items, key = { it.id }) { item ->
-            val inExchange by remember { derivedStateOf { AppState.isItemInExchange(item.id) } }
-            ClosetItemCard(item = item, inExchange = inExchange, onClick = { onShowDetail(item) })
-        }
-        item {
-            Box(
-                Modifier.height(200.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-                    .clickable { onNavigateToAdd() },
-                contentAlignment = Alignment.Center
+        if (AppState.isLoading && items.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AccentYellow)
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement   = Arrangement.spacedBy(10.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.size(40.dp).background(BgCardDark, RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                items(items, key = { it.id }) { item ->
+                    val inExchange by remember { derivedStateOf { AppState.isItemInExchange(item.id) } }
+                    ClosetItemCard(item = item, inExchange = inExchange, onClick = { onShowDetail(item) })
+                }
+                item {
+                    Box(
+                        Modifier.height(200.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                            .clickable { onNavigateToAdd() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.size(40.dp).background(BgCardDark, RoundedCornerShape(50)), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(20.dp))
+                            }
+                            Text("옷 추가하기", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                        }
                     }
-                    Text("옷 추가하기", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
@@ -264,6 +290,7 @@ private fun MyClosetTab(onNavigateToAdd: () -> Unit, onShowDetail: (ClothingItem
 // 탭2: 받은 관심
 // ─────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReceivedLikesTab(
     onOpenGroup: (myItem: ClothingItem, fromUsers: List<User>) -> Unit,
@@ -271,11 +298,8 @@ private fun ReceivedLikesTab(
 ) {
     // 교환완료된 내 아이템 관련 기록은 숨김
     val likes = AppState.receivedLikes.filter { !AppState.isItemCompleted(it.myItem.id) }
-
-    if (likes.isEmpty()) {
-        EmptyState("💛", "아직 받은 관심이 없어요", "옷을 더 등록해보세요!")
-        return
-    }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     // ✅ 같은 내 옷(myItem)에 여러 명이 관심 보내면 하나의 그룹으로 묶는다.
     //    카드 수가 사람 수만큼 늘어나서 헷갈리던 문제 → "옷 1개 = 카드 1개"로 정리.
@@ -290,20 +314,36 @@ private fun ReceivedLikesTab(
         order.values.map { item -> item to (usersByItem[item.id] ?: emptyList()) }
     }
 
-    LazyColumn(
-        Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            scope.launch {
+                isRefreshing = true
+                runCatching { AppState.loadReceivedLikes() }
+                isRefreshing = false
+            }
+        },
+        modifier = Modifier.fillMaxSize()
     ) {
-        items(groups, key = { it.first.id }) { (myItem, fromUsers) ->
-            val inExchange by remember { derivedStateOf { AppState.isItemInExchange(myItem.id) } }
-            GroupedReceivedLikeCard(
-                myItem       = myItem,
-                fromUsers    = fromUsers,
-                inExchange   = inExchange,
-                onOpenGroup  = { onOpenGroup(myItem, fromUsers) },
-                onShowDetail = { onShowDetail(myItem) }
-            )
+        if (groups.isEmpty()) {
+            EmptyState("💛", "아직 받은 관심이 없어요", "옷을 더 등록해보세요!")
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(groups, key = { it.first.id }) { (myItem, fromUsers) ->
+                    val inExchange by remember { derivedStateOf { AppState.isItemInExchange(myItem.id) } }
+                    GroupedReceivedLikeCard(
+                        myItem       = myItem,
+                        fromUsers    = fromUsers,
+                        inExchange   = inExchange,
+                        onOpenGroup  = { onOpenGroup(myItem, fromUsers) },
+                        onShowDetail = { onShowDetail(myItem) }
+                    )
+                }
+            }
         }
     }
 }
@@ -382,6 +422,7 @@ private fun GroupedReceivedLikeCard(
 // 탭3: 보낸 관심
 // ─────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MyLikesTab(
     onShowDetail: (ClothingItem) -> Unit,
@@ -389,36 +430,49 @@ private fun MyLikesTab(
 ) {
     // 교환완료된 상대 아이템은 숨김
     val likes = AppState.sentLikes.filter { !AppState.isTheirItemCompleted(it.item.id) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    if (likes.isEmpty()) {
-        EmptyState("🤍", "아직 관심 표시한 옷이 없어요", "발견 탭에서 마음에 드는 옷을 찾아보세요")
-        return
-    }
-
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement   = Arrangement.spacedBy(10.dp)
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            scope.launch {
+                isRefreshing = true
+                runCatching { AppState.loadSentLikes() }
+                isRefreshing = false
+            }
+        },
+        modifier = Modifier.fillMaxSize()
     ) {
-        items(likes, key = { it.item.id }) { like ->
-            val item = like.item
-            val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
-            val inExchange by remember {
-                derivedStateOf {
-                    AppState.matches.any { m ->
-                        m.theirItem.id == item.id && m.status != ExchangeStatus.COMPLETE
+        if (likes.isEmpty()) {
+            EmptyState("🤍", "아직 관심 표시한 옷이 없어요", "발견 탭에서 마음에 드는 옷을 찾아보세요")
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement   = Arrangement.spacedBy(10.dp)
+            ) {
+                items(likes, key = { it.item.id }) { like ->
+                    val item = like.item
+                    val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
+                    val inExchange by remember {
+                        derivedStateOf {
+                            AppState.matches.any { m ->
+                                m.theirItem.id == item.id && m.status != ExchangeStatus.COMPLETE
+                            }
+                        }
                     }
+                    InteractiveItemCard(
+                        item         = item,
+                        alreadyLiked = alreadyLiked,
+                        inExchange   = inExchange,
+                        onClick      = { onShowDetail(item) },
+                        onLike       = { onLike(item) }
+                    )
                 }
             }
-            InteractiveItemCard(
-                item         = item,
-                alreadyLiked = alreadyLiked,
-                inExchange   = inExchange,
-                onClick      = { onShowDetail(item) },
-                onLike       = { onLike(item) }
-            )
         }
     }
 }
@@ -682,10 +736,13 @@ fun CombinedInterestedClosetDialog(
     onShowDetail: (ClothingItem) -> Unit
 ) {
     // 유저별로 옷장을 각각 불러와서 합친다. 키는 유저 id — 아직 안 불러온 사람은 map에 없음(로딩 판정용).
-    var itemsByUser by remember(fromUsers) { mutableStateOf<Map<Int, List<ClothingItem>>>(emptyMap()) }
+    // 값이 null = 그 사람 옷장 불러오기 실패, emptyList() = 정말로 빈 옷장 (구분해서 보여줘야
+    // "옷장이 비어있다"고 잘못 뜨는 문제가 안 생김).
+    var itemsByUser by remember(fromUsers) { mutableStateOf<Map<Int, List<ClothingItem>?>>(emptyMap()) }
     var filterUserId by remember(fromUsers) { mutableStateOf<Int?>(null) } // null = 전체 보기
+    var retryTick by remember(fromUsers) { mutableStateOf(0) }
 
-    LaunchedEffect(fromUsers) {
+    LaunchedEffect(fromUsers, retryTick) {
         itemsByUser = emptyMap()
         fromUsers.forEach { user ->
             AppState.loadUserCloset(user.id) { items ->
@@ -694,9 +751,10 @@ fun CombinedInterestedClosetDialog(
         }
     }
 
-    val loading = itemsByUser.size < fromUsers.size
+    val stillLoading = itemsByUser.size < fromUsers.size
+    val failedUsers = fromUsers.filter { itemsByUser.containsKey(it.id) && itemsByUser[it.id] == null }
     val combinedItems = remember(itemsByUser, filterUserId) {
-        itemsByUser.values.flatten()
+        itemsByUser.values.filterNotNull().flatten()
             .filter { filterUserId == null || it.user.id == filterUserId }
     }
 
@@ -752,7 +810,26 @@ fun CombinedInterestedClosetDialog(
             }
             Spacer(Modifier.height(14.dp))
 
-            if (loading && combinedItems.isEmpty()) {
+            if (failedUsers.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(PassColor.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${failedUsers.size}명의 옷장을 불러오지 못했어요",
+                        color = PassColor, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = { retryTick++ }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text("재시도", color = PassColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+
+            if (stillLoading && combinedItems.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = AccentYellow)
                 }
@@ -761,7 +838,11 @@ fun CombinedInterestedClosetDialog(
 
             if (combinedItems.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                    Text("옷장이 비어있어요", color = TextSecondary, fontSize = 12.sp)
+                    Text(
+                        if (failedUsers.isNotEmpty()) "불러오기에 실패해서 표시할 옷이 없어요"
+                        else "옷장이 비어있어요",
+                        color = TextSecondary, fontSize = 12.sp
+                    )
                 }
                 return@Column
             }
