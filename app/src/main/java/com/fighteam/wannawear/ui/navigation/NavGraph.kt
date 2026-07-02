@@ -30,11 +30,12 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Chat          : Screen("chat/{matchId}",     "채팅", Icons.Default.ChatBubbleOutline)
     object ShippingGuide : Screen("shipping/{matchId}", "배송", Icons.Default.LocalShipping)
     object AddressManage : Screen("address_manage",     "배송지", Icons.Default.Place)
+    object EditProfile   : Screen("edit_profile",       "프로필 수정", Icons.Default.Edit)
 }
 
 val bottomNavItems = listOf(Screen.Discover, Screen.Matches, Screen.Closet, Screen.Profile)
 
-private val hideBottomBarPrefixes = listOf("add_item", "chat/", "shipping/", "address_manage")
+private val hideBottomBarPrefixes = listOf("add_item", "chat/", "shipping/", "address_manage", "edit_profile")
 
 @Composable
 fun WannaWearNavGraph() {
@@ -131,10 +132,14 @@ fun WannaWearNavGraph() {
                 ClosetScreen(onNavigateToAdd = { navController.navigate(Screen.AddItem.route) })
             }
             composable(Screen.Profile.route)  {
-                ProfileScreen(onNavigateToAddress = { navController.navigate(Screen.AddressManage.route) })
+                ProfileScreen(
+                    onNavigateToAddress = { navController.navigate(Screen.AddressManage.route) },
+                    onNavigateToEditProfile = { navController.navigate(Screen.EditProfile.route) }
+                )
             }
             composable(Screen.AddItem.route)  { AddItemScreen(onBack = { navController.popBackStack() }) }
             composable(Screen.AddressManage.route) { AddressScreen(onBack = { navController.popBackStack() }) }
+            composable(Screen.EditProfile.route) { EditProfileScreen(onBack = { navController.popBackStack() }) }
             composable("chat/{matchId}") { back ->
                 val matchId = back.arguments?.getString("matchId")?.toIntOrNull() ?: return@composable
                 ChatScreen(matchId = matchId, onBack = { navController.popBackStack() })

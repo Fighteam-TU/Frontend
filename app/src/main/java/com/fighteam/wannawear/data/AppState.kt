@@ -101,6 +101,30 @@ object AppState {
         myProfile = res.toUser()
     }
 
+    /** 프로필 수정 화면에서 최신 bio를 미리 채워넣기 위한 원본 응답 조회 (User 모델엔 bio가 없음) */
+    suspend fun fetchMyProfileRaw(): UserProfileResponse = apiCallRequired { api.getMyProfile() }
+
+    /** nickname/bio/avatarUrl 중 null이 아닌 값만 서버에 반영된다 (PATCH /api/users/me) */
+    fun updateProfile(
+        nickname: String? = null,
+        bio: String? = null,
+        avatarUrl: String? = null,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        scope.launch {
+            try {
+                val res = apiCallRequired {
+                    api.updateProfile(UpdateProfileRequest(nickname = nickname, bio = bio, avatarUrl = avatarUrl))
+                }
+                myProfile = res.toUser()
+                onResult(true)
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(false)
+            }
+        }
+    }
+
     suspend fun loadMyCloset() {
         val res = apiCallRequired { api.getMyItems() }
         myCloset.clear()

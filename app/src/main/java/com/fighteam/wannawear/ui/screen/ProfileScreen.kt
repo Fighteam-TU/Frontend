@@ -23,7 +23,7 @@ import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.ui.theme.*
 
 @Composable
-fun ProfileScreen(onNavigateToAddress: () -> Unit = {}) {
+fun ProfileScreen(onNavigateToAddress: () -> Unit = {}, onNavigateToEditProfile: () -> Unit = {}) {
     val me = AppState.myProfile
     // #10: 하드코딩 제거 → AppState 실제 데이터 사용
     val completedCount by remember {
@@ -65,7 +65,8 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}) {
                 AsyncImage(
                     model              = me?.avatar,
                     contentDescription = null,
-                    modifier           = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp)),
+                    modifier           = Modifier.size(64.dp).clip(RoundedCornerShape(16.dp))
+                        .clickable { onNavigateToEditProfile() },
                     contentScale       = ContentScale.Crop
                 )
                 Box(
@@ -73,7 +74,8 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}) {
                         .size(24.dp)
                         .align(Alignment.BottomEnd)
                         .offset(x = 4.dp, y = 4.dp)
-                        .background(AccentYellow, RoundedCornerShape(8.dp)),
+                        .background(AccentYellow, RoundedCornerShape(8.dp))
+                        .clickable { onNavigateToEditProfile() },
                     contentAlignment = Alignment.Center
                 ) {
                     Text("📷", fontSize = 10.sp)
@@ -174,7 +176,7 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}) {
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             listOf(
-                "프로필 수정" to {},
+                "프로필 수정" to onNavigateToEditProfile,
                 "배송지 관리" to onNavigateToAddress,
                 "교환 내역" to {},
                 "설정" to {}
