@@ -49,6 +49,18 @@ object AppState {
 
     val hasDefaultAddress: Boolean get() = addresses.any { it.isDefault }
 
+    // ⚠️ 백엔드 버그 우회: GET /api/exchanges 및 GET /api/exchanges/{id}가 myItem/theirItem을
+    // 요청자가 누구든 상관없이 고정된 값으로 내려줌 (A로 조회해도 B로 조회해도 완전히 동일한 값 —
+    // 실측 확인함). 상태 플래그(myConfirmed 등)는 요청자 기준으로 정확히 내려오니 그건 그대로 두고,
+    // 아이템 객체만 내 user id 기준으로 다시 맞춘다. POST /api/likes 응답(매칭 성사 시점)은 이미
+    // 정확해서 이 보정을 걸어도 조건이 안 맞아 그냥 통과한다(무해함).
+    private fun MatchItem.fixItemPerspective(): MatchItem {
+        val myId = myUserId
+        return if (myId > 0 && myItem.user.id != myId && theirItem.user.id == myId) {
+            copy(myItem = theirItem, theirItem = myItem)
+        } else this
+    }
+
     // ── 공통 API 호출 래퍼 ────────────────────────────────────────────
     // success=false 면 예외로 던지고, data가 없는 성공 응답(로그아웃/삭제류)은 null을 그대로 돌려준다.
     private suspend fun <T> apiCall(block: suspend () -> ApiResponse<T>): T? {
@@ -170,7 +182,7 @@ object AppState {
     suspend fun loadExchanges() {
         val res = apiCallRequired { api.getExchanges() }
         matches.clear()
-        matches.addAll(res.exchanges.map { it.toMatchItem() })
+        matches.addAll(res.exchanges.map { it.toMatchItem().fixItemPerspective() })
     }
 
     suspend fun loadReceivedLikes() {
@@ -303,7 +315,7 @@ object AppState {
                     val summary = res.exchange
                     if (res.matched && summary != null) {
                         // ✅ 응답 자체가 완전히 타입화되어 있어(partnerItem/myItem/partner) 별도 재조회 불필요
-                        val match = summary.toMatchItem()
+                        val match = summary.toMatchItem().fixItemPerspective()
                         matches.removeAll { it.id == match.id }
                         matches.add(0, match)
                         pendingMatchNotifications.add(match)
@@ -409,7 +421,7 @@ object AppState {
     private suspend fun refreshExchangeDetail(matchId: Int) {
         try {
             val res = apiCallRequired { api.getExchange(matchId.toLong()) }
-            val updated = res.toMatchItem()
+            val updated = res.toMatchItem().fixItemPerspective()
             val idx = matches.indexOfFirst { it.id == matchId }
             if (idx >= 0) {
                 matches[idx] = updated.copy(messages = matches[idx].messages)
