@@ -63,9 +63,11 @@ fun MatchesScreen(
     // (당겨서 새로고침은 아래 PullToRefreshBox로 별도 제공).
     LaunchedEffect(Unit) { AppState.refreshExchanges() }
 
-    val filteredMatches = remember(matches, selectedFilter) {
-        matches.filter { it.matchesFilter(selectedFilter) }
-    }
+    // ⚠️ 버그 수정: matches는 SnapshotStateList라 항목이 바뀌어도 "참조" 자체는 안 바뀐다.
+    //    remember(matches, ...)로 감싸면 키가 안 바뀐 걸로 판단해서 확정/취소 후에도
+    //    재계산이 안 되고, 필터 탭을 건드리는 등 "우연히" recompose 될 때까지 화면이 안 바뀌는
+    //    버그가 있었음. remember 없이 매번 계산 — 목록 크기가 작아서 성능 문제 없음.
+    val filteredMatches = matches.filter { it.matchesFilter(selectedFilter) }
 
     addressPromptMatchId?.let { matchId ->
         AddressPromptDialog(
