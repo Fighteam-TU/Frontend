@@ -104,6 +104,9 @@ object AppState {
             }
             // ⚠️ 테스트용 목업 — MockTestData.kt의 ENABLE_MOCK_TEST_DATA를 false로 바꾸면 꺼짐
             if (ENABLE_MOCK_TEST_DATA) seedMockTestData()
+            // 로그인 전에 FCM 토큰이 먼저 발급됐을 수 있어서, 로그인 성공 시점에 한 번 더 등록 시도
+            TokenManager.deviceToken?.let { registerDeviceToken(it) }
+            refreshUnreadNotificationCount()
             isLoading = false
         }
     }
@@ -477,6 +480,153 @@ object AppState {
         }
     }
 
+    // ── 알림 (2026-07-02 추가) ────────────────────────────────────────
+    val notifications: SnapshotStateList<NotificationItem> = mutableStateListOf()
+    var unreadNotificationCount by mutableStateOf(0)
+        private set
+    private var notificationPage = 1
+    var hasMoreNotifications by mutableStateOf(true)
+        private set
+
+    /** 알림 화면 진입 시 첫 페이지부터 새로 로드 */
+    fun loadNotifications() {
+        scope.launch {
+            try {
+                val res = apiCallRequired { api.getNotifications(page = 1) }
+                notificationPage = 1
+                notifications.clear()
+                notifications.addAll(res.notifications.map { it.toNotificationItem() })
+                hasMoreNotifications = res.hasMore
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    /** 무한스크롤 다음 페이지 */
+    fun loadMoreNotifications() {
+        if (!hasMoreNotifications) return
+        scope.launch {
+            try {
+                val nextPage = notificationPage + 1
+                val res = apiCallRequired { api.getNotifications(page = nextPage) }
+                notificationPage = nextPage
+                notifications.addAll(res.notifications.map { it.toNotificationItem() })
+                hasMoreNotifications = res.hasMore
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    /** 앱 포그라운드 진입 시/주기적으로 호출해서 뱃지 숫자 갱신 (실시간 소켓 없음) */
+    fun refreshUnreadNotificationCount() {
+        scope.launch {
+            runCatching { apiCallRequired { api.getUnreadNotificationCount() } }
+                .onSuccess { unreadNotificationCount = it.count }
+        }
+    }
+
+    fun markNotificationRead(notificationId: Int) {
+        val idx = notifications.indexOfFirst { it.id == notificationId }
+        if (idx >= 0 && !notifications[idx].isRead) {
+            notifications[idx] = notifications[idx].copy(isRead = true)
+            unreadNotificationCount = (unreadNotificationCount - 1).coerceAtLeast(0)
+        }
+        scope.launch {
+            try {
+                apiCall { api.markNotificationRead(notificationId.toLong()) }
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    fun markAllNotificationsRead() {
+        for (i in notifications.indices) notifications[i] = notifications[i].copy(isRead = true)
+        unreadNotificationCount = 0
+        scope.launch {
+            try {
+                apiCall { api.markAllNotificationsRead() }
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    /** FirebaseMessagingService.onNewToken()과 로그인 성공 직후 둘 다에서 호출됨 (중복 호출 무해) */
+    fun registerDeviceToken(token: String) {
+        if (token.isBlank()) return
+        TokenManager.deviceToken = token
+        if (!TokenManager.isLoggedIn) return // 로그인 전이면 서버 호출은 로그인 후 재시도로 넘김
+        scope.launch {
+            runCatching { apiCall { api.registerDeviceToken(DeviceTokenRequest(token = token, platform = "android")) } }
+        }
+    }
+
+    /** 로그아웃 시 호출 — 이 기기로는 더 이상 푸시 안 받도록 서버에서 해제 */
+    private fun unregisterDeviceToken() {
+        val token = TokenManager.deviceToken ?: return
+        scope.launch {
+            runCatching { apiCall { api.unregisterDeviceToken(token) } }
+        }
+    }
+
+    // ── 평점 (2026-07-02 추가) ────────────────────────────────────────
+    /** COMPLETE 상태에서만 성공. score 1~5. 코멘트 없음(스펙 확정) */
+    fun submitReview(exchangeId: Int, score: Int, onResult: (Boolean) -> Unit = {}) {
+        scope.launch {
+            try {
+                apiCallRequired { api.submitReview(exchangeId.toLong(), ReviewRequest(score = score)) }
+                onResult(true)
+            } catch (e: ApiException) {
+                errorMessage = when (e.errorBody?.code) {
+                    "REVIEW_ALREADY_SUBMITTED" -> "이미 평점을 남겼어요"
+                    "EXCHANGE_STATUS_INVALID"  -> "교환이 완료된 후에만 평점을 남길 수 있어요"
+                    else -> e.message
+                }
+                onResult(false)
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(false)
+            }
+        }
+    }
+
+    /** 교환 상세 진입 시 평점 모달 노출 여부 판단용 */
+    suspend fun getReviewStatus(exchangeId: Int): ReviewStatusResponse? =
+        try {
+            apiCallRequired { api.getReviewStatus(exchangeId.toLong()) }
+        } catch (e: Exception) {
+            null
+        }
+
+    // ── 검색 (2026-07-02 추가) ────────────────────────────────────────
+    val searchResults: SnapshotStateList<ClothingItem> = mutableStateListOf()
+    var isSearching by mutableStateOf(false)
+        private set
+
+    /** q가 비어있으면 서버가 400을 주므로 호출 전에 걸러낸다. discover와 달리 이미 스와이프한
+     *  아이템도 결과에 포함됨(스펙 3절 — 검색은 의도적 재탐색으로 간주). */
+    fun searchItems(query: String) {
+        if (query.isBlank()) {
+            searchResults.clear()
+            return
+        }
+        scope.launch {
+            isSearching = true
+            try {
+                val res = apiCallRequired { api.searchItems(query.trim()) }
+                searchResults.clear()
+                searchResults.addAll(res.items.map { it.toClothingItem() })
+            } catch (e: Exception) {
+                errorMessage = e.message
+            } finally {
+                isSearching = false
+            }
+        }
+    }
+
     // ── 채팅 (REST 전송 — 실시간 수신은 ChatSocketManager 사용 권장) ───
     fun sendMessage(matchId: Int, text: String) {
         if (text.isBlank()) return
@@ -531,6 +681,7 @@ object AppState {
 
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {
+        unregisterDeviceToken()
         scope.launch {
             val refresh = TokenManager.refreshToken
             if (!refresh.isNullOrBlank()) {
@@ -545,6 +696,9 @@ object AppState {
             sentLikes.clear()
             addresses.clear()
             pendingMatchNotifications.clear()
+            notifications.clear()
+            unreadNotificationCount = 0
+            searchResults.clear()
         }
     }
 }

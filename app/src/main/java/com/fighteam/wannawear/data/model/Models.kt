@@ -84,6 +84,26 @@ data class MatchItem(
 )
 
 // ─────────────────────────────────────────────────────────────────────
+// 알림 (2026-07-02 추가)
+// ─────────────────────────────────────────────────────────────────────
+
+enum class NotificationType {
+    EXCHANGE_MATCHED, NEW_MESSAGE, ADDRESS_CONFIRMED, ITEM_SHIPPED,
+    SHIPPING_STARTED, ITEM_RECEIVED, EXCHANGE_COMPLETED,
+    UNKNOWN // 서버가 향후 새 타입을 추가해도 파싱 실패 없이 무시하고 넘어가기 위한 폴백
+}
+
+data class NotificationItem(
+    val id: Int,
+    val type: NotificationType,
+    val title: String,
+    val body: String,
+    val exchangeId: Int?,
+    val isRead: Boolean,
+    val createdAt: String
+)
+
+// ─────────────────────────────────────────────────────────────────────
 // 배송 주소 (교환 confirm 시 상대방에게 노출됨)
 // ─────────────────────────────────────────────────────────────────────
 

@@ -29,6 +29,13 @@ fun parseExchangeStatus(raw: String?): ExchangeStatus =
         ExchangeStatus.MATCHED
     }
 
+fun parseNotificationType(raw: String?): NotificationType =
+    try {
+        NotificationType.valueOf(raw?.trim()?.uppercase() ?: "UNKNOWN")
+    } catch (e: Exception) {
+        NotificationType.UNKNOWN
+    }
+
 /** ISO-8601(ex: 2026-06-30T10:20:00.123 또는 ...Z) -> "방금"/"n분 전"/"n시간 전"/"n일 전" */
 fun formatRelativeDate(iso: String?): String {
     if (iso.isNullOrBlank()) return ""
@@ -114,6 +121,16 @@ fun MessageResponse.toChatMessage(): ChatMessage = ChatMessage(
     senderId  = senderId?.toClientId() ?: -1,
     text      = content ?: "",
     timestamp = formatClockTime(sentAt)
+)
+
+fun NotificationResponse.toNotificationItem(): NotificationItem = NotificationItem(
+    id         = id.toClientId(),
+    type       = parseNotificationType(type),
+    title      = title ?: "",
+    body       = body ?: "",
+    exchangeId = exchangeId?.toClientId(),
+    isRead     = isRead,
+    createdAt  = formatRelativeDate(createdAt)
 )
 
 fun AddressResponse.toAddress(): Address = Address(

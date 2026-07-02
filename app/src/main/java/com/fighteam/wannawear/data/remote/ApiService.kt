@@ -143,4 +143,45 @@ interface ApiService {
         @Part file: MultipartBody.Part,
         @Part("purpose") purpose: RequestBody
     ): ApiResponse<UploadResponse>
+
+    // ── Notifications (2026-07-02 추가) ──────────────────────────────
+    @GET("/api/notifications")
+    suspend fun getNotifications(
+        @Query("page") page: Int = 1,
+        @Query("limit") limit: Int = 20
+    ): ApiResponse<NotificationListEnvelope>
+
+    @GET("/api/notifications/unread-count")
+    suspend fun getUnreadNotificationCount(): ApiResponse<UnreadCountResponse>
+
+    @PATCH("/api/notifications/{notificationId}/read")
+    suspend fun markNotificationRead(@Path("notificationId") notificationId: Long): ApiResponse<Unit>
+
+    @PATCH("/api/notifications/read-all")
+    suspend fun markAllNotificationsRead(): ApiResponse<Unit>
+
+    @POST("/api/notifications/device-tokens")
+    suspend fun registerDeviceToken(@Body body: DeviceTokenRequest): ApiResponse<Unit>
+
+    @DELETE("/api/notifications/device-tokens")
+    suspend fun unregisterDeviceToken(@Query("token") token: String): ApiResponse<Unit>
+
+    // ── Review / 평점 (2026-07-02 추가) ──────────────────────────────
+    @POST("/api/exchanges/{exchangeId}/review")
+    suspend fun submitReview(
+        @Path("exchangeId") exchangeId: Long,
+        @Body body: ReviewRequest
+    ): ApiResponse<ReviewResponse>
+
+    @GET("/api/exchanges/{exchangeId}/review")
+    suspend fun getReviewStatus(@Path("exchangeId") exchangeId: Long): ApiResponse<ReviewStatusResponse>
+
+    // ── 검색 (2026-07-02 추가) ────────────────────────────────────────
+    /** q가 비어있으면 서버가 400 VALIDATION_ERROR를 반환하니 호출 전에 빈 문자열 체크 필요 */
+    @GET("/api/items/search")
+    suspend fun searchItems(
+        @Query("q") query: String,
+        @Query("page") page: Int = 1,
+        @Query("limit") limit: Int = 20
+    ): ApiResponse<ItemListEnvelope>
 }
