@@ -80,21 +80,24 @@ fun UserSummaryDto.toUser(): User = User(
     id     = id.toClientId(),
     name   = nickname ?: "알 수 없음",
     age    = 0,
-    avatar = avatarUrl ?: ""
+    avatar = avatarUrl ?: "",
+    mannerScore = mannerScore
 )
 
 fun PublicUserResponse.toUser(): User = User(
     id     = id.toClientId(),
     name   = nickname ?: "알 수 없음",
     age    = 0,
-    avatar = avatarUrl ?: ""
+    avatar = avatarUrl ?: "",
+    mannerScore = mannerScore
 )
 
 fun UserProfileResponse.toUser(): User = User(
     id     = id.toClientId(),
     name   = nickname ?: "알 수 없음",
     age    = 0,
-    avatar = avatarUrl ?: ""
+    avatar = avatarUrl ?: "",
+    mannerScore = mannerScore
 )
 
 /** ItemResponse.user 가 없을 때(내 아이템 목록 등)는 fallbackUser로 채운다.

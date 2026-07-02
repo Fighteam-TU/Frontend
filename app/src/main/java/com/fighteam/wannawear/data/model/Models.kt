@@ -11,7 +11,10 @@ data class User(
     val id: Int,
     val name: String,
     val age: Int,
-    val avatar: String
+    val avatar: String,
+    // ⚠️ 서버가 리뷰(평점) 기반으로 계산해서 내려주는 실제 매너온도. 기존엔 이 필드가 아예 없어서
+    // ProfileScreen이 "완료 건수로 대충 계산한 가짜 값"을 보여주고 있었음 — 실제 평점이 반영 안 됨.
+    val mannerScore: Double? = null
 )
 
 data class ClothingItem(

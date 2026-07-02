@@ -25,6 +25,12 @@ import com.fighteam.wannawear.ui.theme.*
 @Composable
 fun ProfileScreen(onNavigateToAddress: () -> Unit = {}, onNavigateToEditProfile: () -> Unit = {}) {
     val me = AppState.myProfile
+    // ⚠️ 매너온도(mannerScore)는 상대가 평점을 남기는 순간 서버에서 바로 갱신되는데,
+    // 프로필은 로그인 시 한 번만 불러와서 새로 받은 평점이 화면에 안 보일 수 있었음 —
+    // 이 탭에 들어올 때마다 조용히 새로고침.
+    LaunchedEffect(Unit) {
+        runCatching { AppState.loadMyProfile() }
+    }
     // #10: 하드코딩 제거 → AppState 실제 데이터 사용
     val completedCount by remember {
         derivedStateOf { AppState.matches.count { it.status == ExchangeStatus.COMPLETE } }
@@ -91,14 +97,12 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}, onNavigateToEditProfile:
                     verticalAlignment     = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                // ✅ 교환 완료 0건이면 불 0개, 완료 수에 비례해 자연스럽게 증가
-                val filledDots = when {
-                    completedCount == 0 -> 0
-                    completedCount < 3  -> 1
-                    completedCount < 6  -> 2
-                    completedCount < 10 -> 3
-                    completedCount < 15 -> 4
-                    else                -> 5
+                // ✅ 실제 매너온도(mannerScore) 기준으로 채워진 점 개수 계산 (별점 개념)
+                val filledDots = (me?.mannerScore ?: 0.0).let { score ->
+                    when {
+                        score <= 0.0 -> 0
+                        else -> score.toInt().coerceIn(0, 5)
+                    }
                 }
                     repeat(5) { i ->
                         Box(
@@ -108,7 +112,7 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}, onNavigateToEditProfile:
                         )
                     }
                     Spacer(Modifier.width(4.dp))
-                    Text("매너 온도 ${String.format("%.1f", (4.0f + completedCount * 0.05f).coerceAtMost(5.0f))}",
+                    Text("매너 온도 ${me?.mannerScore?.let { String.format("%.1f", it) } ?: "-"}",
                         color = TextSecondary, fontSize = 10.sp)
                 }
             }
