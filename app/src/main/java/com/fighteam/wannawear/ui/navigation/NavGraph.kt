@@ -31,11 +31,15 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object ShippingGuide : Screen("shipping/{matchId}", "배송", Icons.Default.LocalShipping)
     object AddressManage : Screen("address_manage",     "배송지", Icons.Default.Place)
     object EditProfile   : Screen("edit_profile",       "프로필 수정", Icons.Default.Edit)
+    object Notifications : Screen("notifications",      "알림", Icons.Default.Notifications)
+    object Search        : Screen("search",             "검색", Icons.Default.Search)
 }
 
 val bottomNavItems = listOf(Screen.Discover, Screen.Matches, Screen.Closet, Screen.Profile)
 
-private val hideBottomBarPrefixes = listOf("add_item", "chat/", "shipping/", "address_manage", "edit_profile")
+private val hideBottomBarPrefixes = listOf(
+    "add_item", "chat/", "shipping/", "address_manage", "edit_profile", "notifications", "search"
+)
 
 @Composable
 fun WannaWearNavGraph() {
@@ -121,7 +125,12 @@ fun WannaWearNavGraph() {
             startDestination = Screen.Discover.route,
             modifier         = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Discover.route) { DiscoverScreen() }
+            composable(Screen.Discover.route) {
+                DiscoverScreen(
+                    onNavigateToSearch = { navController.navigate(Screen.Search.route) },
+                    onNavigateToNotifications = { navController.navigate(Screen.Notifications.route) }
+                )
+            }
             composable(Screen.Matches.route) {
                 MatchesScreen(
                     onOpenChat          = { matchId -> navController.navigate("chat/$matchId") },
@@ -140,6 +149,21 @@ fun WannaWearNavGraph() {
             composable(Screen.AddItem.route)  { AddItemScreen(onBack = { navController.popBackStack() }) }
             composable(Screen.AddressManage.route) { AddressScreen(onBack = { navController.popBackStack() }) }
             composable(Screen.EditProfile.route) { EditProfileScreen(onBack = { navController.popBackStack() }) }
+            composable(Screen.Notifications.route) {
+                NotificationScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenExchange = {
+                        navController.navigate(Screen.Matches.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState    = true
+                        }
+                    }
+                )
+            }
+            composable(Screen.Search.route) {
+                SearchScreen(onBack = { navController.popBackStack() })
+            }
             composable("chat/{matchId}") { back ->
                 val matchId = back.arguments?.getString("matchId")?.toIntOrNull() ?: return@composable
                 ChatScreen(matchId = matchId, onBack = { navController.popBackStack() })

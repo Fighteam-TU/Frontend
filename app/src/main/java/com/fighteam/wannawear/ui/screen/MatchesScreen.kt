@@ -24,6 +24,7 @@ import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.ConfirmResult
 import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.data.model.MatchItem
+import com.fighteam.wannawear.data.remote.dto.ReviewStatusResponse
 import com.fighteam.wannawear.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -493,6 +494,8 @@ fun MatchCard(
                     Spacer(Modifier.width(6.dp))
                     Text("교환이 완료됐어요 🎉", color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
+                Spacer(Modifier.height(8.dp))
+                ReviewPrompt(matchId = match.id, partnerName = match.partner.name)
             }
 
             ExchangeStatus.CANCELLED -> {
@@ -513,4 +516,122 @@ fun MatchCard(
             else -> {}
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 평점(리뷰) — 완료된 교환에만 노출. 코멘트 없이 별점 1~5만 (스펙 2절 확정)
+// ─────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ReviewPrompt(matchId: Int, partnerName: String) {
+    var status by remember(matchId) { mutableStateOf<ReviewStatusResponse?>(null) }
+    var showDialog by remember { mutableStateOf(false) }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    LaunchedEffect(matchId) {
+        status = AppState.getReviewStatus(matchId)
+    }
+
+    val s = status ?: return // 조회 실패/로딩 중이면 조용히 아무것도 안 보여줌 (완료 화면 자체는 이미 위에서 보여짐)
+
+    if (s.myReviewSubmitted) {
+        Row(
+            Modifier.fillMaxWidth().padding(top = 2.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("내가 남긴 평점: ", color = TextTertiary, fontSize = 11.sp)
+            repeat(5) { i ->
+                Icon(
+                    if (i < (s.myScoreGiven ?: 0)) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = null, tint = AccentYellow, modifier = Modifier.size(13.dp)
+                )
+            }
+        }
+        return
+    }
+
+    if (!s.canReview) return
+
+    if (showDialog) {
+        ReviewDialog(
+            partnerName = partnerName,
+            isSubmitting = isSubmitting,
+            onDismiss = { showDialog = false },
+            onSubmit = { score ->
+                isSubmitting = true
+                AppState.submitReview(matchId, score) { success ->
+                    isSubmitting = false
+                    if (success) {
+                        showDialog = false
+                        status = s.copy(myReviewSubmitted = true, myScoreGiven = score)
+                    }
+                }
+            }
+        )
+    }
+
+    OutlinedButton(
+        onClick  = { showDialog = true },
+        modifier = Modifier.fillMaxWidth().height(40.dp),
+        shape    = RoundedCornerShape(12.dp),
+        colors   = ButtonDefaults.outlinedButtonColors(contentColor = AccentYellow)
+    ) {
+        Icon(Icons.Default.StarBorder, contentDescription = null, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("${partnerName}님 평점 남기기", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun ReviewDialog(
+    partnerName: String,
+    isSubmitting: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (Int) -> Unit
+) {
+    var selected by remember { mutableStateOf(0) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        title = { Text("${partnerName}님과의 교환은 어떠셨나요?", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row {
+                    (1..5).forEach { i ->
+                        IconButton(onClick = { selected = i }, modifier = Modifier.size(40.dp)) {
+                            Icon(
+                                if (i <= selected) Icons.Default.Star else Icons.Default.StarBorder,
+                                contentDescription = "${i}점",
+                                tint = AccentYellow,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                }
+                Text(
+                    when (selected) {
+                        0 -> "별을 눌러 평점을 매겨주세요"
+                        1 -> "아쉬웠어요"
+                        2 -> "그저 그랬어요"
+                        3 -> "무난했어요"
+                        4 -> "좋았어요"
+                        else -> "최고였어요!"
+                    },
+                    color = TextSecondary, fontSize = 12.sp
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (selected > 0) onSubmit(selected) },
+                enabled = selected > 0 && !isSubmitting
+            ) {
+                Text(if (isSubmitting) "제출 중..." else "제출하기", color = AccentYellow, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) { Text("나중에", color = TextTertiary) }
+        }
+    )
 }

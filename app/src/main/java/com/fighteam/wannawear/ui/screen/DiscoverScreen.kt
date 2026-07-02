@@ -35,7 +35,10 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DiscoverScreen() {
+fun DiscoverScreen(
+    onNavigateToSearch: () -> Unit = {},
+    onNavigateToNotifications: () -> Unit = {}
+) {
     val cards = AppState.discoverCards
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -43,11 +46,12 @@ fun DiscoverScreen() {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // 최초 진입 시 발견 덱이 비어있으면 한 번 더 로드 시도
+    // 최초 진입 시 발견 덱이 비어있으면 한 번 더 로드 시도 + 알림 뱃지 최신화
     LaunchedEffect(Unit) {
         if (cards.isEmpty() && !AppState.isLoading) {
             AppState.refreshDiscoverFeed()
         }
+        AppState.refreshUnreadNotificationCount()
     }
 
     Box(Modifier.fillMaxSize().background(BgPrimary)) {
@@ -65,10 +69,23 @@ fun DiscoverScreen() {
                     Text("서울 · ${cards.size}개 아이템", color = TextSecondary, fontSize = 10.sp)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(onClick = {}, modifier = Modifier.size(36.dp)
+                    IconButton(onClick = onNavigateToSearch, modifier = Modifier.size(36.dp)
                         .background(BgCard, CircleShape)) {
-                        Icon(Icons.Default.Search, contentDescription = null,
+                        Icon(Icons.Default.Search, contentDescription = "검색",
                             tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    }
+                    Box {
+                        IconButton(onClick = onNavigateToNotifications, modifier = Modifier.size(36.dp)
+                            .background(BgCard, CircleShape)) {
+                            Icon(Icons.Default.Notifications, contentDescription = "알림",
+                                tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        }
+                        if (AppState.unreadNotificationCount > 0) {
+                            Box(
+                                Modifier.size(9.dp).align(Alignment.TopEnd)
+                                    .background(PassColor, CircleShape)
+                            )
+                        }
                     }
                     IconButton(onClick = {}, modifier = Modifier.size(36.dp)
                         .background(BgCard, CircleShape)) {
