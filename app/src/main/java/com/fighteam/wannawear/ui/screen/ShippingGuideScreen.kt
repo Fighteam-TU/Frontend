@@ -35,13 +35,15 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
 
     val clipboard = LocalClipboardManager.current
     var copiedAddress  by remember { mutableStateOf(false) }
-    // ✅ firstOrNull 중복 호출 제거 — status 한 번만 읽어서 비교
-    val alreadyShipped by remember {
-        derivedStateOf {
-            val status = AppState.matches.firstOrNull { it.id == matchId }?.status
-            status == ExchangeStatus.SHIPPING || status == ExchangeStatus.COMPLETE
-        }
+    // ⚠️ 버그 수정: 예전엔 "전체 status == SHIPPING"만 봤는데, SHIPPING은 양쪽 다 발송해야 바뀜.
+    //    그래서 내가 분명히 발송 버튼을 눌러 myShipped=true가 됐어도, 상대가 아직 안 눌렀으면
+    //    status가 그대로 CONFIRMED라 버튼이 안 바뀌고 "눌러도 안 먹히는" 것처럼 보였음.
+    //    내가 발송했는지(myShipped)만 보고 판단하도록 수정.
+    val currentMatch by remember {
+        derivedStateOf { AppState.matches.firstOrNull { it.id == matchId } }
     }
+    val myShipped     = currentMatch?.myShipped == true
+    val partnerShipped = currentMatch?.theirShipped == true
 
     Column(Modifier.fillMaxSize().background(BgPrimary)) {
 
@@ -186,7 +188,7 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
             Spacer(Modifier.height(28.dp))
 
             // 배송 완료 버튼
-            if (!alreadyShipped) {
+            if (!myShipped) {
                 Button(
                     onClick = {
                         AppState.startShipping(matchId)
@@ -210,8 +212,11 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null,
                         tint = StatusComplete, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("발송 완료됐어요! 상대방 수령을 기다려주세요",
-                        color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (partnerShipped) "발송 완료됐어요! 상대방 수령을 기다려주세요"
+                        else "발송 완료됐어요! 상대방 발송을 기다리는 중이에요",
+                        color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
