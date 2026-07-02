@@ -3,6 +3,7 @@ package com.fighteam.wannawear.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -51,7 +52,7 @@ private enum class ClosetTab(val label: String, val emoji: String) {
 @Composable
 fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
     var selectedTab by remember { mutableStateOf(ClosetTab.MY_CLOSET) }
-    var viewingUserCloset by remember { mutableStateOf<User?>(null) }
+    var viewingGroup by remember { mutableStateOf<Pair<ClothingItem, List<User>>?>(null) }
     var detailItem by remember { mutableStateOf<ClothingItem?>(null) }
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
     var deleteConfirmItem by remember { mutableStateOf<ClothingItem?>(null) }
@@ -61,16 +62,17 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
     matchedResult?.let { match ->
         RealMatchPopup(match = match, onClose = {
             matchedResult = null
-            viewingUserCloset = null
+            viewingGroup = null
         })
         return
     }
 
-    // 상대방 옷장 다이얼로그
-    viewingUserCloset?.let { user ->
-        UserClosetDialog(
-            user         = user,
-            onDismiss    = { viewingUserCloset = null },
+    // "받은 관심" 그룹(같은 내 옷에 관심 보낸 사람들) 옷장 모아보기 다이얼로그
+    viewingGroup?.let { (myItem, fromUsers) ->
+        CombinedInterestedClosetDialog(
+            myItem       = myItem,
+            fromUsers    = fromUsers,
+            onDismiss    = { viewingGroup = null },
             onMatched    = { matchedResult = it },
             onShowDetail = { detailItem = it }
         )
@@ -198,8 +200,8 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
         when (selectedTab) {
             ClosetTab.MY_CLOSET      -> MyClosetTab(onNavigateToAdd, onShowDetail = { detailItem = it })
             ClosetTab.RECEIVED_LIKES -> ReceivedLikesTab(
-                onViewUserCloset = { viewingUserCloset = it },
-                onShowDetail     = { detailItem = it }
+                onOpenGroup  = { myItem, fromUsers -> viewingGroup = myItem to fromUsers },
+                onShowDetail = { detailItem = it }
             )
             ClosetTab.MY_LIKES       -> MyLikesTab(
                 onShowDetail = { detailItem = it },
@@ -264,7 +266,7 @@ private fun MyClosetTab(onNavigateToAdd: () -> Unit, onShowDetail: (ClothingItem
 
 @Composable
 private fun ReceivedLikesTab(
-    onViewUserCloset: (User) -> Unit,
+    onOpenGroup: (myItem: ClothingItem, fromUsers: List<User>) -> Unit,
     onShowDetail: (ClothingItem) -> Unit
 ) {
     // 교환완료된 내 아이템 관련 기록은 숨김
@@ -275,30 +277,43 @@ private fun ReceivedLikesTab(
         return
     }
 
+    // ✅ 같은 내 옷(myItem)에 여러 명이 관심 보내면 하나의 그룹으로 묶는다.
+    //    카드 수가 사람 수만큼 늘어나서 헷갈리던 문제 → "옷 1개 = 카드 1개"로 정리.
+    val groups = remember(likes) {
+        val order = LinkedHashMap<Int, ClothingItem>()
+        val usersByItem = LinkedHashMap<Int, MutableList<User>>()
+        likes.forEach { like ->
+            order.putIfAbsent(like.myItem.id, like.myItem)
+            val bucket = usersByItem.getOrPut(like.myItem.id) { mutableListOf() }
+            if (bucket.none { it.id == like.fromUser.id }) bucket.add(like.fromUser)
+        }
+        order.values.map { item -> item to (usersByItem[item.id] ?: emptyList()) }
+    }
+
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        items(likes, key = { "${it.fromUser.id}-${it.myItem.id}" }) { like ->
-            val inExchange by remember { derivedStateOf { AppState.isItemInExchange(like.myItem.id) } }
-            ReceivedLikeCard(
-                fromUser     = like.fromUser,
-                myItem       = like.myItem,
+        items(groups, key = { it.first.id }) { (myItem, fromUsers) ->
+            val inExchange by remember { derivedStateOf { AppState.isItemInExchange(myItem.id) } }
+            GroupedReceivedLikeCard(
+                myItem       = myItem,
+                fromUsers    = fromUsers,
                 inExchange   = inExchange,
-                onViewCloset = { onViewUserCloset(like.fromUser) },
-                onShowDetail = { onShowDetail(like.myItem) }
+                onOpenGroup  = { onOpenGroup(myItem, fromUsers) },
+                onShowDetail = { onShowDetail(myItem) }
             )
         }
     }
 }
 
 @Composable
-private fun ReceivedLikeCard(
-    fromUser: User,
+private fun GroupedReceivedLikeCard(
     myItem: ClothingItem,
+    fromUsers: List<User>,
     inExchange: Boolean,
-    onViewCloset: () -> Unit,
+    onOpenGroup: () -> Unit,
     onShowDetail: () -> Unit
 ) {
     Row(
@@ -322,24 +337,43 @@ private fun ReceivedLikeCard(
         Spacer(Modifier.width(12.dp))
 
         Column(Modifier.weight(1f)) {
+            // 관심 보낸 사람들 아바타를 겹쳐서 스택으로 보여줌
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(fromUser.avatar, null, modifier = Modifier.size(18.dp).clip(CircleShape))
+                Row(horizontalArrangement = Arrangement.spacedBy((-8).dp)) {
+                    fromUsers.take(4).forEach { u ->
+                        Box(
+                            Modifier.size(22.dp).clip(CircleShape)
+                                .background(BgCard)
+                                .border(1.5.dp, BgCard, CircleShape)
+                        ) {
+                            AsyncImage(u.avatar, null, modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                        }
+                    }
+                    if (fromUsers.size > 4) {
+                        Box(
+                            Modifier.size(22.dp).clip(CircleShape)
+                                .background(BgCardDark).border(1.5.dp, BgCard, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("+${fromUsers.size - 4}", color = TextSecondary, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 Spacer(Modifier.width(6.dp))
-                Text(fromUser.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Text("님이 관심 🤍", color = TextSecondary, fontSize = 11.sp)
+                Text("${fromUsers.size}명이 관심 🤍", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(4.dp))
             Text(myItem.name, color = TextSecondary, fontSize = 11.sp, maxLines = 1)
             Text("${myItem.size}  ${myItem.heightFit}", color = TextTertiary, fontSize = 10.sp)
         }
 
         Button(
-            onClick = onViewCloset,
+            onClick = onOpenGroup,
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            Text("옷장 보기", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            Text("옷장 모아보기", fontWeight = FontWeight.Bold, fontSize = 11.sp)
         }
     }
 }
@@ -428,7 +462,8 @@ fun InteractiveItemCard(
     alreadyLiked: Boolean,
     inExchange: Boolean = false,
     onClick: () -> Unit,
-    onLike: () -> Unit
+    onLike: () -> Unit,
+    showOwnerBadge: Boolean = false
 ) {
     Box(Modifier.clip(RoundedCornerShape(16.dp)).background(BgCardDark).clickable { onClick() }) {
         Column {
@@ -458,6 +493,24 @@ fun InteractiveItemCard(
                         tint = if (alreadyLiked) AccentYellowText else AccentYellow,
                         modifier = Modifier.size(16.dp)
                     )
+                }
+
+                // ✅ 여러 명 옷장을 모아서 볼 때, 이 아이템이 누구 옷장 건지 구분하기 위한 작은 프로필 뱃지 (좌하단)
+                if (showOwnerBadge) {
+                    Row(
+                        Modifier.align(Alignment.BottomStart).padding(6.dp)
+                            .background(Color(0xCC000000), RoundedCornerShape(50))
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            item.user.avatar, null,
+                            modifier = Modifier.size(14.dp).clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(item.user.name, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
                 }
             }
             Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
@@ -617,45 +670,98 @@ private fun InfoCell(label: String, value: String) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// 상대방 옷장 다이얼로그
+// 받은 관심 그룹 — 관심 보낸 사람들의 옷장을 하나로 모아보는 다이얼로그
 // ─────────────────────────────────────────────────────────────────────
 
 @Composable
-fun UserClosetDialog(
-    user: User,
+fun CombinedInterestedClosetDialog(
+    myItem: ClothingItem,
+    fromUsers: List<User>,
     onDismiss: () -> Unit,
     onMatched: (MatchItem) -> Unit,
     onShowDetail: (ClothingItem) -> Unit
 ) {
-    var theirItems by remember { mutableStateOf<List<ClothingItem>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    // 유저별로 옷장을 각각 불러와서 합친다. 키는 유저 id — 아직 안 불러온 사람은 map에 없음(로딩 판정용).
+    var itemsByUser by remember(fromUsers) { mutableStateOf<Map<Int, List<ClothingItem>>>(emptyMap()) }
+    var filterUserId by remember(fromUsers) { mutableStateOf<Int?>(null) } // null = 전체 보기
 
-    LaunchedEffect(user.id) {
-        loading = true
-        AppState.loadUserCloset(user.id) { items ->
-            theirItems = items
-            loading = false
+    LaunchedEffect(fromUsers) {
+        itemsByUser = emptyMap()
+        fromUsers.forEach { user ->
+            AppState.loadUserCloset(user.id) { items ->
+                itemsByUser = itemsByUser + (user.id to items)
+            }
         }
+    }
+
+    val loading = itemsByUser.size < fromUsers.size
+    val combinedItems = remember(itemsByUser, filterUserId) {
+        itemsByUser.values.flatten()
+            .filter { filterUserId == null || it.user.id == filterUserId }
     }
 
     Dialog(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().background(BgCard, RoundedCornerShape(20.dp)).padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(user.avatar, null, modifier = Modifier.size(36.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                AsyncImage(
+                    myItem.image, null,
+                    modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Crop
+                )
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("${user.name}님의 옷장", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Text("카드 클릭 = 상세보기 · 하트 = 관심 보내기", color = TextSecondary, fontSize = 10.sp)
+                    Text("\"${myItem.name}\" 관심 ${fromUsers.size}명", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                    Text("옷장을 모아봤어요 · 카드 클릭 = 상세보기", color = TextSecondary, fontSize = 10.sp)
                 }
                 IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
                 }
             }
+            Spacer(Modifier.height(12.dp))
+
+            // 필터 칩 — "전체" + 관심 보낸 사람별로 눌러서 그 사람 옷만 보기
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = filterUserId == null,
+                    onClick  = { filterUserId = null },
+                    label    = { Text("전체", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AccentYellow, selectedLabelColor = AccentYellowText,
+                        containerColor = BgCardDark, labelColor = TextSecondary
+                    ),
+                    border = null
+                )
+                fromUsers.forEach { u ->
+                    FilterChip(
+                        selected = filterUserId == u.id,
+                        onClick  = { filterUserId = u.id },
+                        leadingIcon = {
+                            AsyncImage(u.avatar, null, modifier = Modifier.size(16.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        },
+                        label = { Text(u.name, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AccentYellow, selectedLabelColor = AccentYellowText,
+                            containerColor = BgCardDark, labelColor = TextSecondary
+                        ),
+                        border = null
+                    )
+                }
+            }
             Spacer(Modifier.height(14.dp))
 
-            if (loading) {
+            if (loading && combinedItems.isEmpty()) {
                 Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = AccentYellow)
+                }
+                return@Column
+            }
+
+            if (combinedItems.isEmpty()) {
+                Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
+                    Text("옷장이 비어있어요", color = TextSecondary, fontSize = 12.sp)
                 }
                 return@Column
             }
@@ -666,7 +772,7 @@ fun UserClosetDialog(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement   = Arrangement.spacedBy(8.dp)
             ) {
-                items(theirItems, key = { it.id }) { item ->
+                items(combinedItems, key = { "${it.user.id}-${it.id}" }) { item ->
                     val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
                     val inExchange by remember {
                         derivedStateOf {
@@ -676,11 +782,12 @@ fun UserClosetDialog(
                         }
                     }
                     InteractiveItemCard(
-                        item         = item,
-                        alreadyLiked = alreadyLiked,
-                        inExchange   = inExchange,
-                        onClick      = { onShowDetail(item) },
-                        onLike       = {
+                        item           = item,
+                        alreadyLiked   = alreadyLiked,
+                        inExchange     = inExchange,
+                        showOwnerBadge = fromUsers.size > 1 && filterUserId == null,
+                        onClick        = { onShowDetail(item) },
+                        onLike         = {
                             AppState.likeItem(item) { result ->
                                 if (result is MatchResult.Matched) onMatched(result.match)
                             }
