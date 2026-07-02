@@ -42,6 +42,13 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}) {
     }
     // 에코: 교환 완료 건당 탄소 0.35kg 절감 (더미 계산)
     val carbonSaved = (completedCount * 0.35f)
+    // 닉네임 밑 위치 표시 — 하드코딩("서울 마포구") 대신 실제 등록된 배송지 사용
+    val addressLabel by remember {
+        derivedStateOf {
+            val addr = AppState.addresses.firstOrNull { it.isDefault } ?: AppState.addresses.firstOrNull()
+            addr?.address1?.takeIf { it.isNotBlank() } ?: "배송지 미등록"
+        }
+    }
 
     Column(
         Modifier
@@ -76,7 +83,7 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}) {
             Column {
                 Text(me?.name ?: "...", color = TextPrimary, fontSize = 18.sp,
                     fontWeight = FontWeight.Black)
-                Text("서울 마포구", color = TextSecondary, fontSize = 11.sp)
+                Text(addressLabel, color = TextSecondary, fontSize = 11.sp)
                 Spacer(Modifier.height(6.dp))
                 Row(
                     verticalAlignment     = Alignment.CenterVertically,
