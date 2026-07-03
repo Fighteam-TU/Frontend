@@ -461,11 +461,7 @@ private fun MyLikesTab(
                     val item = like.item
                     val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
                     val inExchange by remember {
-                        derivedStateOf {
-                            AppState.matches.any { m ->
-                                m.theirItem.id == item.id && m.status != ExchangeStatus.COMPLETE
-                            }
-                        }
+                        derivedStateOf { AppState.isTheirItemInExchange(item.id) }
                     }
                     InteractiveItemCard(
                         item         = item,
@@ -863,11 +859,7 @@ fun CombinedInterestedClosetDialog(
                 items(combinedItems, key = { "${it.user.id}-${it.id}" }) { item ->
                     val alreadyLiked by remember { derivedStateOf { AppState.sentLikes.any { it.item.id == item.id } } }
                     val inExchange by remember {
-                        derivedStateOf {
-                            AppState.matches.any { m ->
-                                m.theirItem.id == item.id && m.status != ExchangeStatus.COMPLETE
-                            }
-                        }
+                        derivedStateOf { AppState.isTheirItemInExchange(item.id) }
                     }
                     InteractiveItemCard(
                         item           = item,

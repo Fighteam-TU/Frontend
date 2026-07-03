@@ -703,6 +703,12 @@ object AppState {
     fun isItemInExchange(itemId: Int): Boolean =
         matches.any { it.myItem.id == itemId && it.status != ExchangeStatus.COMPLETE && it.status != ExchangeStatus.CANCELLED }
 
+    // ⚠️ 이전엔 이 체크가 3곳(ClosetScreen 보낸관심/옷장모아보기, SearchScreen)에 각각 복붙돼있었고,
+    //    전부 CANCELLED 제외를 빼먹어서 "취소된 교환"의 상대 아이템도 계속 "교환중"으로 보이는
+    //    버그가 있었음. 공용 함수로 통일.
+    fun isTheirItemInExchange(itemId: Int): Boolean =
+        matches.any { it.theirItem.id == itemId && it.status != ExchangeStatus.COMPLETE && it.status != ExchangeStatus.CANCELLED }
+
     fun isItemCompleted(itemId: Int): Boolean =
         matches.any { it.status == ExchangeStatus.COMPLETE && it.myItem.id == itemId }
 
