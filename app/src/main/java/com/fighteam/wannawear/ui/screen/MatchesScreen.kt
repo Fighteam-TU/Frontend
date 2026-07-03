@@ -481,6 +481,13 @@ fun MatchCard(
                     Spacer(Modifier.width(6.dp))
                     Text("채팅하기", fontSize = 13.sp)
                 }
+                // ⚠️ 서버는 status==COMPLETE(양쪽 다 수령확인)일 때만 리뷰 제출을 받아주지만,
+                //    나는 이미 수령확인을 눌렀으니(myReceived) 미리 별점을 골라둘 수 있게 해준다.
+                //    실제 반영/제출은 상대도 수령확인 눌러서 COMPLETE가 되는 순간 자동으로 됨.
+                if (match.myReceived) {
+                    Spacer(Modifier.height(8.dp))
+                    ReviewPrompt(match)
+                }
             }
 
             ExchangeStatus.COMPLETE -> {
@@ -497,7 +504,7 @@ fun MatchCard(
                     Text("교환이 완료됐어요 🎉", color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(8.dp))
-                ReviewPrompt(matchId = match.id, partnerName = match.partner.name)
+                ReviewPrompt(match)
             }
 
             ExchangeStatus.CANCELLED -> {
@@ -525,50 +532,104 @@ fun MatchCard(
 // ─────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ReviewPrompt(matchId: Int, partnerName: String) {
-    var status by remember(matchId) { mutableStateOf<ReviewStatusResponse?>(null) }
+private fun ReviewPrompt(match: MatchItem) {
+    val matchId = match.id
+    val partnerName = match.partner.name
+    val isComplete = match.status == ExchangeStatus.COMPLETE
+    val pendingScore = AppState.pendingReviewScores[matchId]
+
+    var status by remember(matchId, isComplete) { mutableStateOf<ReviewStatusResponse?>(null) }
     var showDialog by remember { mutableStateOf(false) }
     var isSubmitting by remember { mutableStateOf(false) }
 
-    LaunchedEffect(matchId) {
-        status = AppState.getReviewStatus(matchId)
+    // ⚠️ 서버 리뷰 상태 조회는 COMPLETE일 때만 의미가 있음(그 전엔 어차피 canReview=false로 옴)
+    LaunchedEffect(matchId, isComplete) {
+        if (isComplete) status = AppState.getReviewStatus(matchId)
     }
 
-    val s = status ?: return // 조회 실패/로딩 중이면 조용히 아무것도 안 보여줌 (완료 화면 자체는 이미 위에서 보여짐)
+    if (isComplete) {
+        val s = status ?: return // 조회 실패/로딩 중이면 조용히 아무것도 안 보여줌
 
-    if (s.myReviewSubmitted) {
-        Row(
-            Modifier.fillMaxWidth().padding(top = 2.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("내가 남긴 평점: ", color = TextTertiary, fontSize = 11.sp)
-            repeat(5) { i ->
-                Icon(
-                    if (i < (s.myScoreGiven ?: 0)) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = null, tint = AccentYellow, modifier = Modifier.size(13.dp)
-                )
+        if (s.myReviewSubmitted) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("내가 남긴 평점: ", color = TextTertiary, fontSize = 11.sp)
+                repeat(5) { i ->
+                    Icon(
+                        if (i < (s.myScoreGiven ?: 0)) Icons.Default.Star else Icons.Default.StarBorder,
+                        contentDescription = null, tint = AccentYellow, modifier = Modifier.size(13.dp)
+                    )
+                }
             }
+            return
+        }
+        if (!s.canReview) return
+
+        if (showDialog) {
+            ReviewDialog(
+                partnerName = partnerName,
+                isSubmitting = isSubmitting,
+                onDismiss = { showDialog = false },
+                onSubmit = { score ->
+                    isSubmitting = true
+                    AppState.submitReview(matchId, score) { success ->
+                        isSubmitting = false
+                        if (success) {
+                            showDialog = false
+                            status = s.copy(myReviewSubmitted = true, myScoreGiven = score)
+                        }
+                    }
+                }
+            )
+        }
+
+        OutlinedButton(
+            onClick  = { showDialog = true },
+            modifier = Modifier.fillMaxWidth().height(40.dp),
+            shape    = RoundedCornerShape(12.dp),
+            colors   = ButtonDefaults.outlinedButtonColors(contentColor = AccentYellow)
+        ) {
+            Icon(Icons.Default.StarBorder, contentDescription = null, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("${partnerName}님 평점 남기기", fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
         return
     }
 
-    if (!s.canReview) return
+    // ── 아직 COMPLETE 전(SHIPPING + 내 수령확인만 끝남) — 미리 선택해두기 ──────────
+    if (pendingScore != null) {
+        Row(
+            Modifier.fillMaxWidth()
+                .background(AccentYellow.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(5) { i ->
+                Icon(
+                    if (i < pendingScore) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = null, tint = AccentYellow, modifier = Modifier.size(14.dp)
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "미리 선택해뒀어요 · 상대방 수령확인되면 자동 반영",
+                color = TextSecondary, fontSize = 10.sp, maxLines = 1
+            )
+        }
+        return
+    }
 
     if (showDialog) {
         ReviewDialog(
             partnerName = partnerName,
-            isSubmitting = isSubmitting,
+            isSubmitting = false,
             onDismiss = { showDialog = false },
             onSubmit = { score ->
-                isSubmitting = true
-                AppState.submitReview(matchId, score) { success ->
-                    isSubmitting = false
-                    if (success) {
-                        showDialog = false
-                        status = s.copy(myReviewSubmitted = true, myScoreGiven = score)
-                    }
-                }
+                AppState.stageOrSubmitReview(matchId, score)
+                showDialog = false
             }
         )
     }
@@ -581,7 +642,7 @@ private fun ReviewPrompt(matchId: Int, partnerName: String) {
     ) {
         Icon(Icons.Default.StarBorder, contentDescription = null, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(6.dp))
-        Text("${partnerName}님 평점 남기기", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("${partnerName}님 평점 미리 남기기", fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 

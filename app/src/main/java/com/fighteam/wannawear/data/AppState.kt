@@ -2,9 +2,11 @@ package com.fighteam.wannawear.data
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import com.fighteam.wannawear.data.model.*
 import com.fighteam.wannawear.data.remote.*
 import com.fighteam.wannawear.data.remote.dto.*
@@ -184,6 +186,7 @@ object AppState {
         val res = apiCallRequired { api.getExchanges() }
         matches.clear()
         matches.addAll(res.exchanges.map { it.toMatchItem().fixItemPerspective() })
+        flushPendingReviews()
     }
 
     suspend fun loadReceivedLikes() {
@@ -405,6 +408,7 @@ object AppState {
             } else {
                 matches.add(0, updated)
             }
+            flushPendingReviews()
         } catch (e: Exception) {
             errorMessage = e.message
         }
@@ -546,7 +550,36 @@ object AppState {
         }
     }
 
-    // ── 평점 (2026-07-02 추가) ────────────────────────────────────────
+    // ── 평점 (2026-07-02 추가, 2026-07-03 조기선택 지원) ────────────────
+    // 서버는 status==COMPLETE(양쪽 다 수령확인)일 때만 리뷰 제출을 받아준다. 근데 유저 입장에선
+    // "나는 이미 수령확인 눌렀는데" 상대가 누르기 전까진 평점을 못 남기는 게 불편해서, 내가 미리
+    // 고른 점수를 로컬에 잠깐 들고 있다가 status가 COMPLETE로 바뀌는 순간(상대도 눌렀을 때)
+    // 자동으로 서버에 제출한다. matchId -> 내가 고른 점수.
+    val pendingReviewScores: SnapshotStateMap<Int, Int> = mutableStateMapOf()
+
+    /** 리뷰 화면(별점 선택)에서 호출. 이미 COMPLETE면 즉시 제출, 아니면 로컬에 대기시켜둠 */
+    fun stageOrSubmitReview(matchId: Int, score: Int, onResult: (Boolean) -> Unit = {}) {
+        val match = matches.firstOrNull { it.id == matchId }
+        if (match?.status == ExchangeStatus.COMPLETE) {
+            submitReview(matchId, score, onResult)
+        } else {
+            pendingReviewScores[matchId] = score
+            onResult(true) // 로컬 저장 자체는 성공 — 실제 제출은 양쪽 다 완료되면 자동으로 됨
+        }
+    }
+
+    /** matches가 갱신될 때마다 호출: 대기 중이던 리뷰 중 COMPLETE로 바뀐 게 있으면 자동 제출 */
+    private fun flushPendingReviews() {
+        if (pendingReviewScores.isEmpty()) return
+        val ready = pendingReviewScores.filterKeys { matchId ->
+            matches.firstOrNull { it.id == matchId }?.status == ExchangeStatus.COMPLETE
+        }
+        ready.forEach { (matchId, score) ->
+            pendingReviewScores.remove(matchId)
+            submitReview(matchId, score)
+        }
+    }
+
     /** COMPLETE 상태에서만 성공. score 1~5. 코멘트 없음(스펙 확정) */
     fun submitReview(exchangeId: Int, score: Int, onResult: (Boolean) -> Unit = {}) {
         scope.launch {
@@ -669,6 +702,7 @@ object AppState {
             notifications.clear()
             unreadNotificationCount = 0
             searchResults.clear()
+            pendingReviewScores.clear()
         }
     }
 }
