@@ -195,11 +195,19 @@ fun DiscoverScreen(
                     // 새 아이템 보기
                     IconButton(onClick = {
                         scope.launch {
-                            AppState.refreshDiscoverFeed()
-                            snackbarHostState.showSnackbar(
-                                message  = "새 아이템을 불러왔어요 ✨",
-                                duration = SnackbarDuration.Short
-                            )
+                            val beforeIds = cards.map { it.id }.toSet()
+                            runCatching { AppState.loadDiscoverFeed() }
+                            val afterIds = cards.map { it.id }.toSet()
+                            // ⚠️ 버그 수정: 예전엔 결과가 실제로 바뀌었는지 상관없이 항상 "불러왔어요"
+                            // 라고 떴음. 근데 발견 탭은 "내가 스와이프한 것"만 제외해주기 때문에,
+                            // 지금 덱에 안 넘긴 카드가 남아있으면 다시 불러와도 똑같은 목록이 옴
+                            // (실측 확인함) — 그럴 땐 정직하게 안내한다.
+                            val message = if (beforeIds.isNotEmpty() && beforeIds == afterIds) {
+                                "지금 카드를 먼저 넘겨야 새 아이템이 나와요"
+                            } else {
+                                "새 아이템을 불러왔어요 ✨"
+                            }
+                            snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
                         }
                     }) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = "새 아이템",
