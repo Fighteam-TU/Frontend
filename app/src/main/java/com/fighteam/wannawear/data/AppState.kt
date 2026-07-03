@@ -634,6 +634,33 @@ object AppState {
         }
     }
 
+    // ── 신고 (2026-07-03 추가) ────────────────────────────────────────
+    // ⚠️ 백엔드에 이 기능을 받아줄 엔드포인트가 아직 없음 — UI/로컬 상태는 준비해두되, 실제
+    //    제출은 백엔드가 POST /api/exchanges/{exchangeId}/report를 만들어줘야 성공한다.
+    //    표준적인 신고 남용 방지책 적용: (1) 사유는 정해진 목록 중에서만 선택 가능(자유서술 단독 불가),
+    //    (2) 매칭이 실제로 존재하는 상대만 신고 가능, (3) 교환 1건당 1회만 신고 가능.
+    val reportedMatchIds: SnapshotStateList<Int> = mutableStateListOf()
+
+    fun canReport(matchId: Int): Boolean = matchId !in reportedMatchIds
+
+    fun reportExchange(matchId: Int, reason: String, detail: String?, onResult: (Boolean) -> Unit = {}) {
+        if (!canReport(matchId)) { onResult(false); return }
+        scope.launch {
+            try {
+                apiCall { api.reportExchange(matchId.toLong(), ReportRequest(reason = reason, detail = detail?.ifBlank { null })) }
+                reportedMatchIds.add(matchId)
+                onResult(true)
+            } catch (e: ApiException) {
+                // 백엔드에 아직 엔드포인트가 없어서 지금은 404가 정상적으로 뜬다 — 스낵바로 안내됨
+                errorMessage = if (e.httpCode == 404) "신고 기능은 아직 서버에 준비 중이에요" else e.message
+                onResult(false)
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(false)
+            }
+        }
+    }
+
     // ── 채팅 (REST 전송 — 실시간 수신은 ChatSocketManager 사용 권장) ───
     fun sendMessage(matchId: Int, text: String) {
         if (text.isBlank()) return

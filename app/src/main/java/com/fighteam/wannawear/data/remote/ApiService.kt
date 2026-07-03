@@ -184,4 +184,13 @@ interface ApiService {
         @Query("page") page: Int = 1,
         @Query("limit") limit: Int = 20
     ): ApiResponse<ItemListEnvelope>
+
+    // ── 신고 (2026-07-03 추가) ────────────────────────────────────────
+    // ⚠️ 백엔드에 아직 이 엔드포인트가 없음 (v3/api-docs에서 report 경로 확인 안 됨, 2026-07-03 기준).
+    //    백엔드가 만들어주기 전까지는 404가 남 — UI/로컬 상태만 미리 준비해둔 상태.
+    @POST("/api/exchanges/{exchangeId}/report")
+    suspend fun reportExchange(
+        @Path("exchangeId") exchangeId: Long,
+        @Body body: ReportRequest
+    ): ApiResponse<Unit>
 }

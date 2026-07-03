@@ -1,6 +1,7 @@
 package com.fighteam.wannawear.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -524,6 +525,35 @@ fun MatchCard(
 
             else -> {}
         }
+
+        // ⚠️ 표준 신고 남용 방지: 매칭이 실제로 성사된 상대에게만, 교환 1건당 1회만 가능.
+        //    작고 눈에 안 띄는 텍스트로 둬서 오남용(가벼운 클릭)을 줄임 — 필요할 때만 찾아 누르게.
+        if (match.status == ExchangeStatus.MATCHED || match.status == ExchangeStatus.CONFIRMED ||
+            match.status == ExchangeStatus.SHIPPING || match.status == ExchangeStatus.COMPLETE) {
+            var showReportDialog by remember { mutableStateOf(false) }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                if (AppState.canReport(match.id)) "이 거래에 문제가 있었나요? · 신고하기" else "신고가 접수됐어요",
+                color = TextTertiary, fontSize = 10.sp,
+                modifier = Modifier.fillMaxWidth()
+                    .then(
+                        if (AppState.canReport(match.id))
+                            Modifier.clickable { showReportDialog = true }
+                        else Modifier
+                    ),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            if (showReportDialog) {
+                ReportDialog(
+                    partnerName = match.partner.name,
+                    onDismiss = { showReportDialog = false },
+                    onSubmit = { reason, detail ->
+                        AppState.reportExchange(match.id, reason, detail)
+                        showReportDialog = false
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -697,4 +727,91 @@ private fun ReviewDialog(
             TextButton(onClick = onDismiss, enabled = !isSubmitting) { Text("나중에", color = TextTertiary) }
         }
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 신고 — 표준적인 남용 방지책: 정해진 사유 중 선택 필수 + 최종 확인 단계
+// ─────────────────────────────────────────────────────────────────────
+
+private enum class ReportReason(val code: String, val label: String) {
+    NO_SHIP("NO_SHIP", "발송을 안 하거나 연락이 끊겼어요"),
+    FAKE_OR_DAMAGED("FAKE_OR_DAMAGED", "설명과 다르거나 파손된 상품을 보냈어요"),
+    RUDE_BEHAVIOR("RUDE_BEHAVIOR", "욕설·비매너 행동을 했어요"),
+    SCAM_SUSPECTED("SCAM_SUSPECTED", "사기가 의심돼요"),
+    OTHER("OTHER", "기타")
+}
+
+@Composable
+private fun ReportDialog(
+    partnerName: String,
+    onDismiss: () -> Unit,
+    onSubmit: (reason: String, detail: String?) -> Unit
+) {
+    var step by remember { mutableStateOf(1) } // 1: 사유 선택, 2: 최종 확인
+    var selectedReason by remember { mutableStateOf<ReportReason?>(null) }
+    var detail by remember { mutableStateOf("") }
+
+    if (step == 1) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("${partnerName}님을 신고할까요?", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("사유를 선택해주세요", color = TextSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(4.dp))
+                    ReportReason.values().forEach { reason ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { selectedReason = reason }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedReason == reason,
+                                onClick  = { selectedReason = reason },
+                                colors   = RadioButtonDefaults.colors(selectedColor = AccentYellow)
+                            )
+                            Text(reason.label, color = TextPrimary, fontSize = 13.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = detail,
+                        onValueChange = { if (it.length <= 300) detail = it },
+                        placeholder = { Text("상황을 자세히 알려주세요 (선택)", fontSize = 12.sp) },
+                        minLines = 2, maxLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { if (selectedReason != null) step = 2 },
+                    enabled = selectedReason != null
+                ) { Text("다음", color = AccentYellow, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text("취소", color = TextTertiary) }
+            }
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("정말 신고할까요?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "허위 신고는 이용 제재 대상이 될 수 있어요. 신고 후에는 취소할 수 없어요.",
+                    color = TextSecondary, fontSize = 12.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedReason?.let { onSubmit(it.code, detail) }
+                }) { Text("신고하기", color = PassColor, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { step = 1 }) { Text("뒤로", color = TextTertiary) }
+            }
+        )
+    }
 }
