@@ -5,8 +5,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -20,9 +22,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.ConfirmResult
+import com.fighteam.wannawear.data.model.ClothingItem
 import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.data.model.MatchItem
 import com.fighteam.wannawear.data.remote.dto.ReviewStatusResponse
@@ -70,6 +74,18 @@ fun MatchesScreen(
     //    버그가 있었음. remember 없이 매번 계산 — 목록 크기가 작아서 성능 문제 없음.
     val filteredMatches = matches.filter { it.matchesFilter(selectedFilter) }
 
+    // ⚠️ 백엔드 버그 방어: 같은 내 옷(myItem)으로 매칭이 동시에 여러 건 성사될 수 있는 버그가
+    //    서버에 있음(실측 확인 — 상대 둘이 먼저 내 옷에 좋아요 걸어두면, 내가 둘 다에게 좋아요
+    //    보낼 때 둘 다 매칭이 생겨버림). 서버가 하나를 진행해도 나머지를 자동으로 안 막아주기
+    //    때문에, 클라이언트에서 감지해서 "하나만 골라 유지, 나머지는 취소" 하도록 유도한다.
+    val activeStatuses = setOf(ExchangeStatus.MATCHED, ExchangeStatus.CONFIRMED, ExchangeStatus.SHIPPING)
+    val duplicateGroups = matches
+        .filter { it.status in activeStatuses }
+        .groupBy { it.myItem.id }
+        .filterValues { it.size > 1 }
+        .map { (_, list) -> list.first().myItem to list }
+    var showDuplicateDialog by remember { mutableStateOf(false) }
+
     addressPromptMatchId?.let { matchId ->
         AddressPromptDialog(
             onDismiss = { addressPromptMatchId = null },
@@ -103,6 +119,31 @@ fun MatchesScreen(
         Column(Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp)) {
             Text("교환 내역", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
             Text("총 ${matches.size}건", color = TextSecondary, fontSize = 10.sp)
+        }
+
+        if (duplicateGroups.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    .background(PassColor.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                    .clickable { showDuplicateDialog = true }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = PassColor, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("같은 옷으로 매칭이 여러 건 있어요", color = PassColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("한 옷은 한 곳에만 보낼 수 있어요 · 눌러서 정리하기", color = TextSecondary, fontSize = 10.sp)
+                }
+                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = PassColor, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+        if (showDuplicateDialog) {
+            DuplicateMatchDialog(
+                groups    = duplicateGroups,
+                onDismiss = { showDuplicateDialog = false }
+            )
         }
 
         // 상태별 필터 탭
@@ -218,6 +259,89 @@ private fun AddressPromptDialog(
             TextButton(onClick = onDismiss) { Text("취소") }
         }
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 중복 매칭 정리 — 같은 내 옷으로 매칭이 여러 건 성사된 경우(백엔드 버그) 방어 UI
+// ─────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DuplicateMatchDialog(
+    groups: List<Pair<ClothingItem, List<MatchItem>>>,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth()
+                .background(BgCard, RoundedCornerShape(20.dp))
+                .padding(20.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("중복 매칭 정리하기", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    Text("유지할 교환을 고르면 나머지는 자동으로 취소돼요", color = TextSecondary, fontSize = 11.sp)
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+
+            if (groups.isEmpty()) {
+                Text("모두 정리됐어요! 🎉", color = TextSecondary, fontSize = 13.sp,
+                    modifier = Modifier.padding(vertical = 20.dp))
+            } else {
+                Column(
+                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    groups.forEach { (myItem, conflicting) ->
+                        DuplicateGroupCard(myItem = myItem, conflicting = conflicting)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DuplicateGroupCard(myItem: ClothingItem, conflicting: List<MatchItem>) {
+    var resolving by remember(myItem.id) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().background(BgCardDark, RoundedCornerShape(14.dp)).padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(myItem.image, null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+            Spacer(Modifier.width(10.dp))
+            Text("\"${myItem.name}\" — ${conflicting.size}건 중복", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(10.dp))
+        conflicting.forEach { match ->
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncImage(match.partner.avatar, null, modifier = Modifier.size(28.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(match.partner.name, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(match.status.label, color = TextSecondary, fontSize = 10.sp)
+                }
+                Button(
+                    onClick = {
+                        resolving = true
+                        conflicting.filter { it.id != match.id }.forEach { other ->
+                            AppState.cancelExchange(other.id)
+                        }
+                    },
+                    enabled = !resolving,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text("이걸로 진행", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
 }
 
 @Composable
