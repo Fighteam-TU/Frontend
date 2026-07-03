@@ -23,8 +23,13 @@ import com.fighteam.wannawear.data.model.ExchangeStatus
 import com.fighteam.wannawear.ui.theme.*
 
 @Composable
-fun ProfileScreen(onNavigateToAddress: () -> Unit = {}, onNavigateToEditProfile: () -> Unit = {}) {
+fun ProfileScreen(
+    onNavigateToAddress: () -> Unit = {},
+    onNavigateToEditProfile: () -> Unit = {},
+    onLogout: () -> Unit = {}
+) {
     val me = AppState.myProfile
+    var showLogoutConfirm by remember { mutableStateOf(false) }
     // ⚠️ 매너온도(mannerScore)는 상대가 평점을 남기는 순간 서버에서 바로 갱신되는데,
     // 프로필은 로그인 시 한 번만 불러와서 새로 받은 평점이 화면에 안 보일 수 있었음 —
     // 이 탭에 들어올 때마다 조용히 새로고침.
@@ -201,6 +206,38 @@ fun ProfileScreen(onNavigateToAddress: () -> Unit = {}, onNavigateToEditProfile:
             }
         }
 
+        Spacer(Modifier.height(20.dp))
+
+        // 로그아웃
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .background(BgCard, RoundedCornerShape(12.dp))
+                .clickable { showLogoutConfirm = true }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text("로그아웃", color = PassColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        }
+
         Spacer(Modifier.height(24.dp))
+    }
+
+    if (showLogoutConfirm) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirm = false },
+            title = { Text("로그아웃 할까요?", fontWeight = FontWeight.Bold) },
+            text  = { Text("다시 로그인하려면 이메일/비밀번호가 필요해요.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLogoutConfirm = false
+                    onLogout()
+                }) { Text("로그아웃", color = PassColor, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutConfirm = false }) { Text("취소") }
+            }
+        )
     }
 }

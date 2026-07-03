@@ -167,7 +167,11 @@ fun WannaWearNavGraph() {
             composable(Screen.Profile.route)  {
                 ProfileScreen(
                     onNavigateToAddress = { navController.navigate(Screen.AddressManage.route) },
-                    onNavigateToEditProfile = { navController.navigate(Screen.EditProfile.route) }
+                    onNavigateToEditProfile = { navController.navigate(Screen.EditProfile.route) },
+                    onLogout = {
+                        AppState.logout()
+                        isLoggedIn = false
+                    }
                 )
             }
             composable(Screen.AddItem.route)  { AddItemScreen(onBack = { navController.popBackStack() }) }
