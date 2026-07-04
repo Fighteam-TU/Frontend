@@ -187,6 +187,7 @@ object AppState {
         matches.clear()
         matches.addAll(res.exchanges.map { it.toMatchItem().fixItemPerspective() })
         flushPendingReviews()
+        autoCancelLeftoverMatchesForCompletedItems()
     }
 
     suspend fun loadReceivedLikes() {
@@ -376,6 +377,9 @@ object AppState {
                 val match = matches.firstOrNull { it.id == matchId }
                 if (match != null && match.status == ExchangeStatus.COMPLETE) {
                     myCloset.removeAll { it.id == match.myItem.id }
+                    // ⚠️ 같은 아이템으로 걸려있던 다른 매칭(백엔드 중복 매칭 버그로 생긴 것들)을
+                    //    사용자가 수동으로 안 지워도 여기서 자동으로 정리한다.
+                    autoCancelLeftoverMatchesForCompletedItems()
                 }
             } catch (e: Exception) {
                 errorMessage = e.message
@@ -412,9 +416,24 @@ object AppState {
                 matches.add(0, updated)
             }
             flushPendingReviews()
+            autoCancelLeftoverMatchesForCompletedItems()
         } catch (e: Exception) {
             errorMessage = e.message
         }
+    }
+
+    // ⚠️ 백엔드 버그(같은 아이템으로 매칭이 여러 건 성사될 수 있음) 대응: 어떤 아이템이 이미
+    //    COMPLETE(교환 완료)됐는데도 같은 아이템에 걸린 다른 매칭이 MATCHED/CONFIRMED/SHIPPING
+    //    상태로 남아있으면 자동으로 취소한다. completeExchange 직후, 그리고 loadExchanges/
+    //    refreshExchangeDetail로 매칭 목록을 새로 받아올 때마다 호출해서, 다른 세션에서 이미
+    //    완료된 경우까지 놓치지 않고 정리한다. 사용자가 수동으로 하나씩 취소할 필요 없음.
+    private fun autoCancelLeftoverMatchesForCompletedItems() {
+        val activeStatuses = setOf(ExchangeStatus.MATCHED, ExchangeStatus.CONFIRMED, ExchangeStatus.SHIPPING)
+        val completedItemIds = matches.filter { it.status == ExchangeStatus.COMPLETE }.map { it.myItem.id }.toSet()
+        if (completedItemIds.isEmpty()) return
+        matches
+            .filter { it.status in activeStatuses && it.myItem.id in completedItemIds }
+            .forEach { stale -> cancelExchange(stale.id) }
     }
 
     // ── 주소 ─────────────────────────────────────────────────────────
