@@ -34,6 +34,7 @@ import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.MatchResult
 import com.fighteam.wannawear.data.RemoveResult
 import com.fighteam.wannawear.data.model.*
+import com.fighteam.wannawear.data.remote.dto.PublicUserResponse
 import com.fighteam.wannawear.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -177,7 +178,7 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
                 val selected = selectedTab == tab
                 val badgeCount = when (tab) {
                     ClosetTab.RECEIVED_LIKES -> AppState.receivedLikes
-                        .count { !AppState.isItemCompleted(it.myItem.id) }
+                        .count { !AppState.isItemCompleted(it.myItem.id) && !AppState.hasActiveOrCompletedExchangeWith(it.myItem.id, it.fromUser.id) }
                     ClosetTab.MY_LIKES       -> AppState.sentLikes.size
                     else                     -> 0
                 }
@@ -299,8 +300,13 @@ private fun ReceivedLikesTab(
     onOpenGroup: (myItem: ClothingItem, fromUsers: List<User>) -> Unit,
     onShowDetail: (ClothingItem) -> Unit
 ) {
-    // 교환완료된 내 아이템 관련 기록은 숨김
-    val likes = AppState.receivedLikes.filter { !AppState.isItemCompleted(it.myItem.id) }
+    // ⚠️ 서버가 매칭 성사 후에도 이 항목을 안 지워줘서(실측 확인), 이미 좋아요를 눌러줘서
+    //    매칭까지 성사된 사람이 계속 "받은 관심"에 남아있는 문제가 있었음. 완료된 내 아이템뿐 아니라,
+    //    이미 그 사람과 매칭(취소 제외)이 성사된 건도 걸러낸다 — 그건 이제 "교환 내역"에서 다뤄야 함.
+    val likes = AppState.receivedLikes.filter { like ->
+        !AppState.isItemCompleted(like.myItem.id) &&
+            !AppState.hasActiveOrCompletedExchangeWith(like.myItem.id, like.fromUser.id)
+    }
     var isRefreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -724,6 +730,15 @@ private fun InfoCell(label: String, value: String) {
     }
 }
 
+@Composable
+private fun ProfileStatCell(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = AccentYellow, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = TextTertiary, fontSize = 9.sp)
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // 받은 관심 그룹 — 관심 보낸 사람들의 옷장을 하나로 모아보는 다이얼로그
 // ─────────────────────────────────────────────────────────────────────
@@ -759,6 +774,14 @@ fun CombinedInterestedClosetDialog(
             // ⚠️ 이미 나와 교환 완료된 아이템은 다시 좋아요 보낼 수 있는 것처럼 보이면 안 됨
             .filterNot { AppState.isTheirItemCompleted(it.id) }
             .filter { filterUserId == null || it.user.id == filterUserId }
+    }
+
+    // ⚠️ 특정 사람으로 필터링했을 때만 그 사람의 프로필 요약(매너온도/총교환수)을 불러온다.
+    //    "신고당한 유무" 같은 필드는 현재 백엔드 응답(PublicUserResponse)에 아예 없어서 표시 불가 —
+    //    백엔드에 필드 추가를 요청해둔 상태.
+    var filteredUserProfile by remember(filterUserId) { mutableStateOf<PublicUserResponse?>(null) }
+    LaunchedEffect(filterUserId) {
+        filteredUserProfile = filterUserId?.let { AppState.getPublicProfile(it) }
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -812,6 +835,25 @@ fun CombinedInterestedClosetDialog(
                 }
             }
             Spacer(Modifier.height(14.dp))
+
+            // 특정 사람 선택 시 프로필 요약 (매너온도 · 교환 횟수 · 등록한 옷 개수)
+            if (filterUserId != null) {
+                val profile = filteredUserProfile
+                val itemCount = itemsByUser[filterUserId]?.size
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(BgCardDark, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    ProfileStatCell("매너온도", profile?.mannerScore?.let { String.format("%.1f", it) } ?: "-")
+                    Box(Modifier.width(1.dp).height(24.dp).background(BorderSubtle).align(Alignment.CenterVertically))
+                    ProfileStatCell("교환 횟수", profile?.totalExchanges?.let { "${it}회" } ?: "-")
+                    Box(Modifier.width(1.dp).height(24.dp).background(BorderSubtle).align(Alignment.CenterVertically))
+                    ProfileStatCell("등록한 옷", itemCount?.let { "${it}개" } ?: "-")
+                }
+                Spacer(Modifier.height(10.dp))
+            }
 
             if (failedUsers.isNotEmpty()) {
                 Row(

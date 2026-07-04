@@ -319,15 +319,16 @@ object AppState {
         }
     }
 
-    /** 발견 탭 패스(왼쪽 스와이프/X버튼) — 서버에 기록해서 다음 discover 조회부터 제외되게 함 */
+    /** 발견 탭 패스(왼쪽 스와이프/X버튼) — 로컬에서만 카드를 넘긴다.
+     *  ⚠️ 백엔드 버그 우회: POST /api/likes/{itemId}/dislike를 실측해보니 응답은
+     *  {"disliked":true}로 성공한 것처럼 오지만, 실제로는 진짜 "좋아요"로 기록됨
+     *  (내 sentLikes에 들어가고 상대 receivedLikes에도 뜸 — 심하면 원치 않는 매칭까지 생길 수 있음).
+     *  서버가 고치기 전까진 이 엔드포인트를 아예 호출하지 않는다. 대신 패스한 아이템은
+     *  서버에 기록이 안 남아서 나중에 discover를 새로고침하면 다시 나올 수 있음(감수).
+     */
     fun passItem(itemId: Int) {
-        scope.launch {
-            try {
-                apiCall { api.dislikeItem(itemId.toLong()) }
-            } catch (e: Exception) {
-                errorMessage = e.message
-            }
-        }
+        // 의도적으로 아무 API도 호출하지 않음 — DiscoverScreen에서 이미 cards.removeAt(0)로
+        // 로컬 제거를 처리하기 때문에 이 함수는 지금은 사실상 아무것도 안 해도 된다.
     }
 
     // ── 교환 상태 전이 ────────────────────────────────────────────────
@@ -680,6 +681,14 @@ object AppState {
         status == ExchangeStatus.CONFIRMED ||
         status == ExchangeStatus.SHIPPING
 
+    /** 상대 프로필 요약(매너온도/총교환수) 조회 — 옷장 모아보기에서 특정 사람 선택 시 사용 */
+    suspend fun getPublicProfile(userId: Int): PublicUserResponse? =
+        try {
+            apiCallRequired { api.getPublicProfile(userId.toLong()) }
+        } catch (e: Exception) {
+            null
+        }
+
     // ── 상대 옷장 조회 (다이얼로그 열 때 비동기 로드) ───────────────────
     // ⚠️ 반환값 null = 불러오기 실패(네트워크/서버 에러), emptyList() = 진짜로 옷장이 비어있음.
     //    예전엔 실패도 emptyList()로 뭉뚱그려서 "옷장이 비어있다"고 잘못 보이는 문제가 있었음.
@@ -714,6 +723,12 @@ object AppState {
 
     fun isTheirItemCompleted(itemId: Int): Boolean =
         matches.any { it.status == ExchangeStatus.COMPLETE && it.theirItem.id == itemId }
+
+    // ⚠️ 서버가 매칭 성사 후에도 GET /api/likes/received에서 그 항목을 안 지워줌(실측 확인) —
+    //    그래서 이미 좋아요를 눌러서 매칭이 성사된 상대가 "받은 관심"에 계속 남아있는 문제가 있었음.
+    //    CANCELLED는 제외 — 취소됐으면 다시 판단할 수 있게 "받은 관심"에 나와야 함.
+    fun hasActiveOrCompletedExchangeWith(myItemId: Int, partnerUserId: Int): Boolean =
+        matches.any { it.myItem.id == myItemId && it.partner.id == partnerUserId && it.status != ExchangeStatus.CANCELLED }
 
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {
