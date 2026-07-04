@@ -56,7 +56,11 @@ private fun MatchItem.matchesFilter(filter: MatchFilter): Boolean = when (filter
 // "받은 관심"처럼 같은 내 옷으로 매칭이 여러 건이면 카드 하나로 묶어서 보여주기 위한 타입
 private sealed class MatchListEntry {
     data class Single(val match: MatchItem) : MatchListEntry()
-    data class Duplicate(val myItem: ClothingItem, val conflicting: List<MatchItem>) : MatchListEntry()
+    data class Duplicate(
+        val myItem: ClothingItem,
+        val conflicting: List<MatchItem>,
+        val alreadyCompletedElsewhere: Boolean
+    ) : MatchListEntry()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,18 +93,24 @@ fun MatchesScreen(
     //    보낼 때 둘 다 매칭이 생겨버림). 서버가 하나를 진행해도 나머지를 자동으로 안 막아주기
     //    때문에, 클라이언트에서 감지해서 "받은 관심"처럼 카드 하나로 묶어 보여주고 하나만
     //    골라 유지, 나머지는 자동 취소하도록 유도한다.
+    //    ⚠️ 추가 케이스(실사용 스크린샷으로 확인됨): 이미 COMPLETE로 끝난 교환이 있는데도
+    //    같은 아이템으로 걸린 다른 MATCHED/CONFIRMED 매칭이 안 사라지는 경우도 있음 — 이때는
+    //    "여러 개 중 하나 고르기"가 아니라 "이미 끝난 옷이니 남은 매칭 전부 정리"로 다뤄야 한다.
     val activeStatuses = setOf(ExchangeStatus.MATCHED, ExchangeStatus.CONFIRMED, ExchangeStatus.SHIPPING)
+    val completedItemIds = matches.filter { it.status == ExchangeStatus.COMPLETE }.map { it.myItem.id }.toSet()
     val duplicateGroups = matches
         .filter { it.status in activeStatuses }
         .groupBy { it.myItem.id }
-        .filterValues { it.size > 1 }
-        .map { (_, list) -> list.first().myItem to list }
+        .filter { (itemId, list) -> list.size > 1 || itemId in completedItemIds }
+        .map { (itemId, list) -> Triple(list.first().myItem, list, itemId in completedItemIds) }
     val duplicateMatchIds = duplicateGroups.flatMap { it.second }.map { it.id }.toSet()
     var resolvingGroupItemId by remember { mutableStateOf<Int?>(null) }
 
     // "전체" 필터에서만 중복 매칭을 그룹 카드로 합쳐 보여줌 — 특정 상태 필터에서는 개별 카드 그대로.
     val displayEntries: List<MatchListEntry> = if (selectedFilter == MatchFilter.ALL) {
-        val dupEntries = duplicateGroups.map { (item, list) -> MatchListEntry.Duplicate(item, list) }
+        val dupEntries = duplicateGroups.map { (item, list, completedElsewhere) ->
+            MatchListEntry.Duplicate(item, list, completedElsewhere)
+        }
         val singleEntries = filteredMatches.filter { it.id !in duplicateMatchIds }.map { MatchListEntry.Single(it) }
         dupEntries + singleEntries
     } else {
@@ -177,9 +187,10 @@ fun MatchesScreen(
         val group = duplicateGroups.firstOrNull { it.first.id == itemId }
         if (group != null) {
             DuplicateResolveDialog(
-                myItem      = group.first,
-                conflicting = group.second,
-                onDismiss   = { resolvingGroupItemId = null }
+                myItem                    = group.first,
+                conflicting               = group.second,
+                alreadyCompletedElsewhere = group.third,
+                onDismiss                 = { resolvingGroupItemId = null }
             )
         }
     }
@@ -265,9 +276,10 @@ fun MatchesScreen(
                                 onRequestCancel     = { cancelConfirmMatchId = entry.match.id }
                             )
                             is MatchListEntry.Duplicate -> GroupedDuplicateMatchCard(
-                                myItem        = entry.myItem,
-                                conflicting   = entry.conflicting,
-                                onOpenResolve = { resolvingGroupItemId = entry.myItem.id }
+                                myItem                    = entry.myItem,
+                                conflicting               = entry.conflicting,
+                                alreadyCompletedElsewhere = entry.alreadyCompletedElsewhere,
+                                onOpenResolve             = { resolvingGroupItemId = entry.myItem.id }
                             )
                         }
                     }
@@ -329,6 +341,7 @@ private fun AddressPromptDialog(
 private fun GroupedDuplicateMatchCard(
     myItem: ClothingItem,
     conflicting: List<MatchItem>,
+    alreadyCompletedElsewhere: Boolean,
     onOpenResolve: () -> Unit
 ) {
     Row(
@@ -341,7 +354,8 @@ private fun GroupedDuplicateMatchCard(
         Box(Modifier.size(70.dp).clip(RoundedCornerShape(10.dp))) {
             AsyncImage(myItem.image, null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             Text(
-                "중복", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black,
+                if (alreadyCompletedElsewhere) "완료됨" else "중복",
+                color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Black,
                 modifier = Modifier.align(Alignment.TopStart).padding(4.dp)
                     .background(PassColor, RoundedCornerShape(4.dp))
                     .padding(horizontal = 5.dp, vertical = 2.dp)
@@ -372,11 +386,15 @@ private fun GroupedDuplicateMatchCard(
                     }
                 }
                 Spacer(Modifier.width(6.dp))
-                Text("${conflicting.size}명과 매칭 ⚠️", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text("${conflicting.size}건 매칭 ⚠️", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(Modifier.height(4.dp))
             Text(myItem.name, color = TextSecondary, fontSize = 11.sp, maxLines = 1)
-            Text("한 곳에만 보낼 수 있어요 · 하나만 골라주세요", color = PassColor, fontSize = 10.sp)
+            Text(
+                if (alreadyCompletedElsewhere) "이미 다른 곳으로 교환 완료됐어요 · 정리해주세요"
+                else "한 곳에만 보낼 수 있어요 · 하나만 골라주세요",
+                color = PassColor, fontSize = 10.sp
+            )
         }
 
         Button(
@@ -385,7 +403,7 @@ private fun GroupedDuplicateMatchCard(
             colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            Text("고르기", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            Text(if (alreadyCompletedElsewhere) "정리하기" else "고르기", fontWeight = FontWeight.Bold, fontSize = 11.sp)
         }
     }
 }
@@ -394,6 +412,7 @@ private fun GroupedDuplicateMatchCard(
 private fun DuplicateResolveDialog(
     myItem: ClothingItem,
     conflicting: List<MatchItem>,
+    alreadyCompletedElsewhere: Boolean,
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -407,13 +426,32 @@ private fun DuplicateResolveDialog(
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text("\"${myItem.name}\" 매칭 ${conflicting.size}건", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Black)
-                    Text("유지할 교환을 고르면 나머지는 자동으로 취소돼요", color = TextSecondary, fontSize = 10.sp)
+                    Text(
+                        if (alreadyCompletedElsewhere) "이미 다른 곳으로 교환 완료된 옷이에요 — 남은 매칭을 정리해주세요"
+                        else "유지할 교환을 고르면 나머지는 자동으로 취소돼요",
+                        color = if (alreadyCompletedElsewhere) PassColor else TextSecondary, fontSize = 10.sp
+                    )
                 }
                 IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.Close, contentDescription = null, tint = TextSecondary)
                 }
             }
             Spacer(Modifier.height(14.dp))
+
+            if (alreadyCompletedElsewhere) {
+                Button(
+                    onClick = {
+                        conflicting.forEach { AppState.cancelExchange(it.id) }
+                        onDismiss()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PassColor, contentColor = Color.White)
+                ) {
+                    Text("전부 취소하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(12.dp))
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 conflicting.forEach { match ->
@@ -434,16 +472,27 @@ private fun DuplicateResolveDialog(
                             Text(match.theirItem.name, color = TextSecondary, fontSize = 10.sp, maxLines = 1)
                             Text(match.status.label, color = TextTertiary, fontSize = 9.sp)
                         }
-                        Button(
-                            onClick = {
-                                conflicting.filter { it.id != match.id }.forEach { other -> AppState.cancelExchange(other.id) }
-                                onDismiss()
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text("이걸로 진행", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        if (alreadyCompletedElsewhere) {
+                            Button(
+                                onClick = { AppState.cancelExchange(match.id) },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = PassColor.copy(alpha = 0.15f), contentColor = PassColor),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("취소하기", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    conflicting.filter { it.id != match.id }.forEach { other -> AppState.cancelExchange(other.id) }
+                                    onDismiss()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text("이걸로 진행", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

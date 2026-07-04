@@ -319,16 +319,18 @@ object AppState {
         }
     }
 
-    /** 발견 탭 패스(왼쪽 스와이프/X버튼) — 로컬에서만 카드를 넘긴다.
-     *  ⚠️ 백엔드 버그 우회: POST /api/likes/{itemId}/dislike를 실측해보니 응답은
-     *  {"disliked":true}로 성공한 것처럼 오지만, 실제로는 진짜 "좋아요"로 기록됨
-     *  (내 sentLikes에 들어가고 상대 receivedLikes에도 뜸 — 심하면 원치 않는 매칭까지 생길 수 있음).
-     *  서버가 고치기 전까진 이 엔드포인트를 아예 호출하지 않는다. 대신 패스한 아이템은
-     *  서버에 기록이 안 남아서 나중에 discover를 새로고침하면 다시 나올 수 있음(감수).
+    /** 발견 탭 패스(왼쪽 스와이프/X버튼) — 서버에 기록해서 다음 discover 조회부터 제외되게 함.
+     *  ⚠️ 2026-07-04: 백엔드가 "dislike가 실제로 좋아요로 저장되던" 버그를 고쳐서 재검증
+     *  완료(sentLikes/receivedLikes에 더 이상 안 뜸) — 다시 정상 호출하도록 되돌림.
      */
     fun passItem(itemId: Int) {
-        // 의도적으로 아무 API도 호출하지 않음 — DiscoverScreen에서 이미 cards.removeAt(0)로
-        // 로컬 제거를 처리하기 때문에 이 함수는 지금은 사실상 아무것도 안 해도 된다.
+        scope.launch {
+            try {
+                apiCall { api.dislikeItem(itemId.toLong()) }
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
     }
 
     // ── 교환 상태 전이 ────────────────────────────────────────────────
