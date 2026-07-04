@@ -635,31 +635,21 @@ object AppState {
         }
     }
 
-    // ── 신고 (2026-07-03 추가) ────────────────────────────────────────
-    // ⚠️ 백엔드에 이 기능을 받아줄 엔드포인트가 아직 없음 — UI/로컬 상태는 준비해두되, 실제
-    //    제출은 백엔드가 POST /api/exchanges/{exchangeId}/report를 만들어줘야 성공한다.
-    //    표준적인 신고 남용 방지책 적용: (1) 사유는 정해진 목록 중에서만 선택 가능(자유서술 단독 불가),
-    //    (2) 매칭이 실제로 존재하는 상대만 신고 가능, (3) 교환 1건당 1회만 신고 가능.
+    // ── 신고 (2026-07-03 추가, 2026-07-04 데모 전용으로 전환) ───────────
+    // ⚠️ 백엔드에서 신고 기능을 만들 계획이 없어서, 실제 서버 호출 없이 로컬에서만 흉내낸다.
+    //    reportedMatchIds는 AppState의 인메모리 상태라 앱 프로세스가 재시작되면(=재접속하면)
+    //    자연스럽게 초기화됨 — 별도 영속 저장 안 함, 데모용 UX만 제공.
+    //    표준 남용 방지책은 UI에서 그대로 유지: 정해진 사유 목록 중 필수 선택, 최종 확인 단계,
+    //    교환 1건당 1회만 가능.
     val reportedMatchIds: SnapshotStateList<Int> = mutableStateListOf()
 
     fun canReport(matchId: Int): Boolean = matchId !in reportedMatchIds
 
     fun reportExchange(matchId: Int, reason: String, detail: String?, onResult: (Boolean) -> Unit = {}) {
         if (!canReport(matchId)) { onResult(false); return }
-        scope.launch {
-            try {
-                apiCall { api.reportExchange(matchId.toLong(), ReportRequest(reason = reason, detail = detail?.ifBlank { null })) }
-                reportedMatchIds.add(matchId)
-                onResult(true)
-            } catch (e: ApiException) {
-                // 백엔드에 아직 엔드포인트가 없어서 지금은 404가 정상적으로 뜬다 — 스낵바로 안내됨
-                errorMessage = if (e.httpCode == 404) "신고 기능은 아직 서버에 준비 중이에요" else e.message
-                onResult(false)
-            } catch (e: Exception) {
-                errorMessage = e.message
-                onResult(false)
-            }
-        }
+        // 실제 서버 호출 없음 — 데모: 로컬에서 즉시 "접수됨" 처리
+        reportedMatchIds.add(matchId)
+        onResult(true)
     }
 
     // ── 채팅 (REST 전송 — 실시간 수신은 ChatSocketManager 사용 권장) ───
