@@ -1,6 +1,7 @@
 package com.fighteam.wannawear.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,25 +25,53 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
+import com.fighteam.wannawear.data.model.ChatMessage
+import com.fighteam.wannawear.data.model.ChatMessageType
 import com.fighteam.wannawear.data.model.ExchangeStatus
+import com.fighteam.wannawear.data.model.MatchRoomStatus
 import com.fighteam.wannawear.data.remote.ChatSocketManager
 import com.fighteam.wannawear.ui.theme.*
 import kotlinx.coroutines.launch
 
 
+/**
+ * ⚠️ 2026-07-04 수정: 기존 Exchange(MatchItem) 채팅뿐 아니라 신규 MatchRoom 채팅도 같은
+ * 화면에서 처리하도록 확장 (match-room-spec.md 기준, roomId가 기존 exchangeId를 계승한다는
+ * 마이그레이션 전제하에 동일 채팅 엔드포인트/소켓을 재사용). MatchRoom이 아직 백엔드 미배포라
+ * 실제로는 항상 MatchItem 경로만 타게 됨.
+ */
 @Composable
-fun ChatScreen(matchId: Int, onBack: () -> Unit) {
+fun ChatScreen(
+    matchId: Int,
+    onBack: () -> Unit,
+    onNavigateToSelection: (Int) -> Unit = {}
+) {
     val match = AppState.matches.firstOrNull { it.id == matchId }
-        ?: run { onBack(); return }
+    val room  = if (match == null) AppState.matchRooms.firstOrNull { it.id == matchId } else null
+    if (match == null && room == null) { onBack(); return }
 
-    val messages = match.messages
+    val messages: List<ChatMessage> = match?.messages ?: room!!.messages
+    val partnerAvatar = match?.partner?.avatar ?: room!!.partner.avatar
+    val partnerName   = match?.partner?.name ?: room!!.partner.name
+    val statusText = when {
+        match != null -> when (match.status) {
+            ExchangeStatus.MATCHED   -> "교환 대기 중"
+            ExchangeStatus.CONFIRMED -> "배송 준비 중"
+            ExchangeStatus.SHIPPING  -> "배송 중"
+            ExchangeStatus.COMPLETE  -> "교환 완료"
+            else                     -> ""
+        }
+        else -> room!!.status.label
+    }
+    val chatOpen = match?.let { AppState.isChatOpen(it.status) }
+        ?: (room!!.status != MatchRoomStatus.COMPLETE && room.status != MatchRoomStatus.CANCELLED)
+
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val chatOpen  = AppState.isChatOpen(match.status)
 
     // 채팅방 진입 시: REST로 히스토리 로드 + 읽음 처리, WebSocket 연결(실시간 수신용, API_SPEC 12절 메인 경로)
     DisposableEffect(matchId) {
-        AppState.loadMessages(matchId)
+        if (match != null) AppState.loadMessages(matchId) else AppState.loadMatchRoomMessages(matchId)
         ChatSocketManager.connect(matchId)
         onDispose { ChatSocketManager.disconnect() }
     }
@@ -66,33 +95,26 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
                 Icon(Icons.Default.ArrowBack, contentDescription = null, tint = TextPrimary)
             }
             AsyncImage(
-                match.partner.avatar, null,
+                partnerAvatar, null,
                 modifier      = Modifier.size(36.dp).clip(CircleShape),
                 contentScale  = ContentScale.Crop
             )
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(match.partner.name, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text(
-                    when (match.status) {
-                        ExchangeStatus.MATCHED   -> "교환 대기 중"
-                        ExchangeStatus.CONFIRMED -> "배송 준비 중"
-                        ExchangeStatus.SHIPPING  -> "배송 중"
-                        ExchangeStatus.COMPLETE  -> "교환 완료"
-                        else                     -> ""
-                    },
-                    color = TextSecondary, fontSize = 10.sp
-                )
+                Text(partnerName, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(statusText, color = TextSecondary, fontSize = 10.sp)
             }
-            // 교환 아이템 미니 프리뷰
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(match.myItem.image, null,
-                    modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
-                Text("⇄", color = TextTertiary, fontSize = 12.sp)
-                AsyncImage(match.theirItem.image, null,
-                    modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+            // 교환 아이템 미니 프리뷰 (기존 1:1 Exchange만 — MatchRoom은 N개라 생략)
+            if (match != null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    AsyncImage(match.myItem.image, null,
+                        modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+                    Text("⇄", color = TextTertiary, fontSize = 12.sp)
+                    AsyncImage(match.theirItem.image, null,
+                        modifier = Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+                }
+                Spacer(Modifier.width(8.dp))
             }
-            Spacer(Modifier.width(8.dp))
         }
 
         // ── 교환완료 안내 배너 ─────────────────────────────────────
@@ -127,12 +149,20 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
 
             items(messages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == AppState.myUserId
-                ChatBubble(
-                    text      = msg.text,
-                    timestamp = msg.timestamp,
-                    isMe      = isMe,
-                    avatar    = if (!isMe) match.partner.avatar else null
-                )
+                if (msg.type == ChatMessageType.EXCHANGE_MODIFICATION_REQUEST) {
+                    ModificationRequestBubble(
+                        message = msg,
+                        isMe    = isMe,
+                        onClickCta = { roomId -> onNavigateToSelection(roomId) }
+                    )
+                } else {
+                    ChatBubble(
+                        text      = msg.text,
+                        timestamp = msg.timestamp,
+                        isMe      = isMe,
+                        avatar    = if (!isMe) partnerAvatar else null
+                    )
+                }
             }
 
             if (messages.isEmpty()) {
@@ -140,7 +170,7 @@ fun ChatScreen(matchId: Int, onBack: () -> Unit) {
                     Box(Modifier.fillMaxWidth().padding(vertical = 40.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("💬", fontSize = 32.sp)
-                            Text("${match.partner.name}님과 대화를 시작해보세요", color = TextSecondary, fontSize = 13.sp)
+                            Text("${partnerName}님과 대화를 시작해보세요", color = TextSecondary, fontSize = 13.sp)
                         }
                     }
                 }
@@ -264,6 +294,45 @@ private fun ChatBubble(
             // 상대 메시지: 타임스탬프 오른쪽
             Text(timestamp, color = TextTertiary, fontSize = 9.sp,
                 modifier = Modifier.align(Alignment.Bottom).padding(start = 4.dp, bottom = 2.dp))
+        }
+    }
+}
+
+/** ⚠️ 2026-07-04 추가, v0.1 설계 제안(match-room-spec.md §7) — 교환 수정 요청 커스텀 말풍선.
+ *  일반 텍스트 대신 카드형 UI로 렌더링하고, CTA 버튼 클릭 시 재선택 화면으로 이동. */
+@Composable
+private fun ModificationRequestBubble(
+    message: ChatMessage,
+    isMe: Boolean,
+    onClickCta: (Int) -> Unit
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start) {
+        Column(
+            Modifier
+                .widthIn(max = 260.dp)
+                .background(BgCard, RoundedCornerShape(14.dp))
+                .padding(14.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.SwapHoriz, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("교환 수정 요청", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                message.text.ifBlank { "다시 선택해주세요" },
+                color = TextSecondary, fontSize = 12.sp
+            )
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = { message.modificationRoomId?.let(onClickCta) },
+                modifier = Modifier.fillMaxWidth().height(36.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text(message.modificationCtaLabel, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

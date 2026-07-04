@@ -36,6 +36,21 @@ fun parseNotificationType(raw: String?): NotificationType =
         NotificationType.UNKNOWN
     }
 
+fun parseMatchRoomStatus(raw: String?): MatchRoomStatus =
+    try {
+        MatchRoomStatus.valueOf(raw?.trim()?.uppercase() ?: "SELECTING")
+    } catch (e: Exception) {
+        MatchRoomStatus.SELECTING
+    }
+
+fun parseChatMessageType(raw: String?): ChatMessageType =
+    try {
+        if (raw.isNullOrBlank()) ChatMessageType.TEXT
+        else ChatMessageType.valueOf(raw.trim().uppercase())
+    } catch (e: Exception) {
+        ChatMessageType.UNKNOWN
+    }
+
 /** ISO-8601(ex: 2026-06-30T10:20:00.123 또는 ...Z) -> "방금"/"n분 전"/"n시간 전"/"n일 전" */
 fun formatRelativeDate(iso: String?): String {
     if (iso.isNullOrBlank()) return ""
@@ -123,7 +138,11 @@ fun MessageResponse.toChatMessage(): ChatMessage = ChatMessage(
     id        = id,
     senderId  = senderId?.toClientId() ?: -1,
     text      = content ?: "",
-    timestamp = formatClockTime(sentAt)
+    timestamp = formatClockTime(sentAt),
+    type      = parseChatMessageType(type),
+    modificationRoomId          = payload?.roomId?.toClientId(),
+    modificationProposedItemIds = payload?.proposedItemIds?.map { it.toClientId() } ?: emptyList(),
+    modificationCtaLabel        = payload?.ctaLabel ?: "교환 재선택하러 가기"
 )
 
 fun NotificationResponse.toNotificationItem(): NotificationItem = NotificationItem(
@@ -182,4 +201,27 @@ fun ExchangeSummaryDto.toMatchItem(): MatchItem = MatchItem(
 private fun emptyClothingItem(): ClothingItem = ClothingItem(
     id = -1, image = "", name = "알 수 없는 아이템", brand = "", size = "", condition = "",
     user = User(0, "", 0, "")
+)
+
+/** MatchRoom (2026-07-04 추가, v0.1 설계 제안 단계) */
+fun MatchRoomResponse.toMatchRoom(): MatchRoom = MatchRoom(
+    id             = id.toClientId(),
+    partner        = partner?.toUser() ?: User(0, "알 수 없음", 0, ""),
+    status         = parseMatchRoomStatus(status),
+    myWantList     = myWantList?.map { it.toClothingItem() } ?: emptyList(),
+    theirWantList  = theirWantList?.map { it.toClothingItem() } ?: emptyList(),
+    date           = formatRelativeDate(updatedAt ?: createdAt),
+    messages       = mutableStateListOf(),
+    myLockedSelection    = myLockedSelection ?: false,
+    theirLockedSelection = theirLockedSelection ?: false,
+    myConfirmed    = myConfirmed ?: false,
+    theirConfirmed = theirConfirmed ?: false,
+    myShipped      = myShipped ?: false,
+    theirShipped   = theirShipped ?: false,
+    myReceived     = myReceived ?: false,
+    theirReceived  = theirReceived ?: false,
+    partnerAddress = partnerAddress,
+    modificationRequestedByMe   = modificationRequestedByMe ?: false,
+    modificationRequestedByThem = modificationRequestedByThem ?: false,
+    modificationProposedItemIds = modificationProposedItemIds?.map { it.toClientId() } ?: emptyList()
 )

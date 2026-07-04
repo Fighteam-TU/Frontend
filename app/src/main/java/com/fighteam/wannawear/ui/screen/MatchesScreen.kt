@@ -278,7 +278,7 @@ fun MatchesScreen(
 }
 
 @Composable
-private fun AddressPromptDialog(
+fun AddressPromptDialog(
     onDismiss: () -> Unit,
     onSubmit: (address1: String, recipient: String) -> Unit
 ) {

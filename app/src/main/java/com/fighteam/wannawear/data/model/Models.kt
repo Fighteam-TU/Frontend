@@ -43,11 +43,23 @@ enum class ClothingCategory(val label: String) {
 // 채팅 메시지
 // ─────────────────────────────────────────────────────────────────────
 
+enum class ChatMessageType {
+    TEXT,
+    EXCHANGE_MODIFICATION_REQUEST, // 커스텀 말풍선 (match-room-spec.md §7)
+    UNKNOWN
+}
+
 data class ChatMessage(
     val id: Long,
     val senderId: Int,
     val text: String,
-    val timestamp: String
+    val timestamp: String,
+    // ⚠️ 2026-07-04 추가 — MatchRoom 수정요청 커스텀 말풍선용. 기존 코드는 이 필드들을
+    // 안 써도 기본값으로 일반 텍스트 메시지로 동작하니 하위 호환 문제 없음.
+    val type: ChatMessageType = ChatMessageType.TEXT,
+    val modificationRoomId: Int? = null,
+    val modificationProposedItemIds: List<Int> = emptyList(),
+    val modificationCtaLabel: String = "교환 재선택하러 가기"
 )
 
 // ─────────────────────────────────────────────────────────────────────
@@ -87,12 +99,50 @@ data class MatchItem(
 )
 
 // ─────────────────────────────────────────────────────────────────────
+// 매칭룸(MatchRoom) — N:M 다중 교환 구조 (2026-07-04 추가)
+// ⚠️ 백엔드 v0.1 설계 제안 단계(match-room-spec.md 기준) — 아직 실서버에 배포되지 않음.
+// 같은 두 사용자 사이의 매칭을 방 하나로 통합하고, 여러 아이템을 서로 협의해서 고르는 구조.
+// ─────────────────────────────────────────────────────────────────────
+
+enum class MatchRoomStatus(val label: String, val description: String) {
+    SELECTING ("선택 중",      "서로 원하는 옷을 자유롭게 골라보세요"),
+    MATCHED   ("선택 완료",    "양쪽 다 선택을 확정했어요. 배송지를 확인해주세요"),
+    CONFIRMED ("배송 준비 중", "배송지 확인이 끝났어요. 발송을 진행해주세요"),
+    SHIPPING  ("배송 중",      "서로 배송이 시작됐어요"),
+    COMPLETE  ("교환 완료",    "교환이 성공적으로 완료됐어요"),
+    CANCELLED ("취소됨",       "매칭이 취소됐어요")
+}
+
+data class MatchRoom(
+    val id: Int,
+    val partner: User,
+    val status: MatchRoomStatus,
+    val myWantList: List<ClothingItem>,     // 내가 받고 싶어서 고른, 상대 소유 아이템들
+    val theirWantList: List<ClothingItem>,  // 상대가 받고 싶어서 고른, 내 소유 아이템들
+    val date: String = "",
+    val messages: SnapshotStateList<ChatMessage> = mutableStateListOf(),
+    val myLockedSelection: Boolean = false,
+    val theirLockedSelection: Boolean = false,
+    val myConfirmed: Boolean = false,
+    val theirConfirmed: Boolean = false,
+    val myShipped: Boolean = false,
+    val theirShipped: Boolean = false,
+    val myReceived: Boolean = false,
+    val theirReceived: Boolean = false,
+    val partnerAddress: String? = null,
+    val modificationRequestedByMe: Boolean = false,
+    val modificationRequestedByThem: Boolean = false,
+    val modificationProposedItemIds: List<Int> = emptyList()
+)
+
+// ─────────────────────────────────────────────────────────────────────
 // 알림 (2026-07-02 추가)
 // ─────────────────────────────────────────────────────────────────────
 
 enum class NotificationType {
     EXCHANGE_MATCHED, NEW_MESSAGE, ADDRESS_CONFIRMED, ITEM_SHIPPED,
     SHIPPING_STARTED, ITEM_RECEIVED, EXCHANGE_COMPLETED,
+    EXCHANGE_MODIFICATION_REQUESTED, // 2026-07-04 추가 (match-room-spec.md §9)
     UNKNOWN // 서버가 향후 새 타입을 추가해도 파싱 실패 없이 무시하고 넘어가기 위한 폴백
 }
 

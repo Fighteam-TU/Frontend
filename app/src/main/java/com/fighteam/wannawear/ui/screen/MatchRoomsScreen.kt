@@ -1,0 +1,433 @@
+package com.fighteam.wannawear.ui.screen
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.fighteam.wannawear.data.AppState
+import com.fighteam.wannawear.data.ConfirmResult
+import com.fighteam.wannawear.data.model.ClothingItem
+import com.fighteam.wannawear.data.model.MatchRoom
+import com.fighteam.wannawear.data.model.MatchRoomStatus
+import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.launch
+
+/**
+ * MatchRoom(N:M 다중 교환) 목록/액션 화면.
+ * ⚠️ 2026-07-04 추가, v0.1 설계 제안 단계(match-room-spec.md) — 백엔드 미배포라 지금은
+ * 대부분 액션이 실패(404 등)할 수 있음. 배포되면 라이브로 재검증 필요. 프로필 탭 "매칭룸(베타)"
+ * 메뉴로만 접근 가능하고, 기존 "매칭" 탭(Exchange 1:1 구조)은 그대로 유지됨(병행 기간).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MatchRoomsScreen(
+    onBack: () -> Unit,
+    onOpenChat: (Int) -> Unit,
+    onSelectItems: (Int) -> Unit
+) {
+    val rooms = AppState.matchRooms
+    var isRefreshing by remember { mutableStateOf(false) }
+    var addressPromptRoomId by remember { mutableStateOf<Int?>(null) }
+    var cancelConfirmRoomId by remember { mutableStateOf<Int?>(null) }
+    var modificationRoomId by remember { mutableStateOf<Int?>(null) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) { AppState.refreshMatchRooms() }
+
+    addressPromptRoomId?.let { roomId ->
+        AddressPromptDialog(
+            onDismiss = { addressPromptRoomId = null },
+            onSubmit  = { address1, recipient ->
+                AppState.addAddress(address1 = address1, recipient = recipient.ifBlank { null }) { success ->
+                    addressPromptRoomId = null
+                    if (success) AppState.confirmMatchRoom(roomId)
+                }
+            }
+        )
+    }
+
+    cancelConfirmRoomId?.let { roomId ->
+        AlertDialog(
+            onDismissRequest = { cancelConfirmRoomId = null },
+            title = { Text("교환을 취소할까요?", fontWeight = FontWeight.Bold) },
+            text  = { Text("이 방의 교환이 즉시 취소돼요. 되돌릴 수 없어요.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    AppState.cancelMatchRoom(roomId)
+                    cancelConfirmRoomId = null
+                }) { Text("취소하기", color = PassColor, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { cancelConfirmRoomId = null }) { Text("닫기") } }
+        )
+    }
+
+    modificationRoomId?.let { roomId ->
+        val room = rooms.firstOrNull { it.id == roomId }
+        if (room != null) {
+            ModificationRequestDialog(
+                room = room,
+                onDismiss = { modificationRoomId = null },
+                onSubmit = { itemIds ->
+                    AppState.requestMatchRoomModification(roomId, itemIds)
+                    modificationRoomId = null
+                }
+            )
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(BgPrimary)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "뒤로", tint = TextPrimary)
+            }
+            Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                Text("매칭룸", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text("베타 — 여러 벌을 한 번에 교환해보세요", color = TextSecondary, fontSize = 10.sp)
+            }
+        }
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                scope.launch {
+                    isRefreshing = true
+                    runCatching { AppState.loadMatchRooms() }
+                    isRefreshing = false
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (rooms.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("📭", fontSize = 32.sp)
+                        Text("아직 매칭룸이 없어요", color = TextSecondary, fontSize = 13.sp)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(rooms, key = { it.id }) { room ->
+                        MatchRoomCard(
+                            room = room,
+                            onOpenChat        = { onOpenChat(room.id) },
+                            onSelectItems     = { onSelectItems(room.id) },
+                            onLockSelection   = { AppState.lockMatchRoomSelection(room.id) },
+                            onConfirm         = {
+                                AppState.confirmMatchRoom(room.id) { result ->
+                                    if (result is ConfirmResult.NeedsAddress) addressPromptRoomId = room.id
+                                }
+                            },
+                            onShip            = { AppState.shipMatchRoom(room.id) },
+                            onComplete        = { AppState.completeMatchRoom(room.id) },
+                            onRequestCancel   = { cancelConfirmRoomId = room.id },
+                            onRequestModification = { modificationRoomId = room.id }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MatchRoomCard(
+    room: MatchRoom,
+    onOpenChat: () -> Unit,
+    onSelectItems: () -> Unit,
+    onLockSelection: () -> Unit,
+    onConfirm: () -> Unit,
+    onShip: () -> Unit,
+    onComplete: () -> Unit,
+    onRequestCancel: () -> Unit,
+    onRequestModification: () -> Unit
+) {
+    val (statusColor, statusBg) = when (room.status) {
+        MatchRoomStatus.SELECTING -> Pair(StatusPending, StatusPending.copy(alpha = 0.12f))
+        MatchRoomStatus.MATCHED   -> Pair(AccentYellow, AccentYellow.copy(alpha = 0.12f))
+        MatchRoomStatus.CONFIRMED, MatchRoomStatus.SHIPPING -> Pair(StatusShipping, StatusShipping.copy(alpha = 0.12f))
+        MatchRoomStatus.COMPLETE  -> Pair(StatusComplete, StatusComplete.copy(alpha = 0.12f))
+        MatchRoomStatus.CANCELLED -> Pair(TextTertiary, TextTertiary.copy(alpha = 0.12f))
+    }
+    val canRequestModification = room.status == MatchRoomStatus.SELECTING ||
+        room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED
+    val canCancel = room.status != MatchRoomStatus.COMPLETE && room.status != MatchRoomStatus.CANCELLED
+
+    Column(
+        Modifier.fillMaxWidth().background(BgCard, RoundedCornerShape(16.dp)).padding(16.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(room.partner.avatar, null, modifier = Modifier.size(36.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(room.partner.name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(room.date, color = TextSecondary, fontSize = 10.sp)
+            }
+            Text(
+                room.status.label, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.background(statusBg, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(room.status.description, color = TextSecondary, fontSize = 11.sp)
+
+        if (room.modificationRequestedByThem) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.PriorityHigh, contentDescription = null, tint = PassColor, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("${room.partner.name}님이 교환 수정을 요청했어요", color = PassColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        } else if (room.modificationRequestedByMe) {
+            Spacer(Modifier.height(6.dp))
+            Text("수정 요청을 보냈어요 · 상대방 응답을 기다리는 중", color = StatusPending, fontSize = 11.sp)
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // 내가 받을 아이템들 / 상대가 받을 아이템들 — N개일 수 있어서 가로 스크롤 행으로
+        WantListRow(title = "내가 받을 옷", items = room.myWantList)
+        Spacer(Modifier.height(8.dp))
+        WantListRow(title = "상대가 받을 옷", items = room.theirWantList)
+
+        Spacer(Modifier.height(14.dp))
+
+        when (room.status) {
+            MatchRoomStatus.SELECTING -> {
+                Button(
+                    onClick = onSelectItems,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText)
+                ) {
+                    Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("아이템 선택하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(
+                    onClick = onLockSelection,
+                    enabled = !room.myLockedSelection && room.myWantList.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentYellow)
+                ) {
+                    Text(
+                        if (room.myLockedSelection) "선택 잠금 완료 · 상대방 대기 중" else "선택 완료(잠금)",
+                        fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            MatchRoomStatus.MATCHED -> {
+                Button(
+                    onClick = onConfirm,
+                    enabled = !room.myConfirmed,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentYellow, contentColor = AccentYellowText,
+                        disabledContainerColor = BgCardDark, disabledContentColor = TextTertiary
+                    )
+                ) {
+                    Text(if (room.myConfirmed) "상대방 확인 대기 중" else "배송지 확인하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                }
+            }
+            MatchRoomStatus.CONFIRMED -> {
+                Button(
+                    onClick = onShip,
+                    enabled = !room.myShipped,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = StatusShipping.copy(alpha = 0.15f), contentColor = StatusShipping,
+                        disabledContainerColor = BgCardDark, disabledContentColor = TextTertiary
+                    )
+                ) {
+                    Text(if (room.myShipped) "상대방 발송 대기 중" else "발송 완료(한 박스로)", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                }
+            }
+            MatchRoomStatus.SHIPPING -> {
+                Button(
+                    onClick = onComplete,
+                    enabled = !room.myReceived,
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = StatusComplete.copy(alpha = 0.15f), contentColor = StatusComplete,
+                        disabledContainerColor = BgCardDark, disabledContentColor = TextTertiary
+                    )
+                ) {
+                    Text(if (room.myReceived) "상대방 수령 대기 중" else "수령 확인", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                }
+            }
+            MatchRoomStatus.COMPLETE -> {
+                Row(
+                    Modifier.fillMaxWidth().background(StatusComplete.copy(alpha = 0.08f), RoundedCornerShape(10.dp)).padding(12.dp),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = StatusComplete, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("교환이 완료됐어요 🎉", color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+            MatchRoomStatus.CANCELLED -> {
+                Row(
+                    Modifier.fillMaxWidth().background(TextTertiary.copy(alpha = 0.08f), RoundedCornerShape(10.dp)).padding(12.dp),
+                    horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, tint = TextTertiary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("취소된 매칭룸이에요", color = TextTertiary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        if (room.status != MatchRoomStatus.CANCELLED) {
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(
+                    onClick = onOpenChat,
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                ) {
+                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("채팅하기", fontSize = 12.sp)
+                }
+                if (canRequestModification) {
+                    OutlinedButton(
+                        onClick = onRequestModification,
+                        modifier = Modifier.weight(1f).height(38.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusShipping)
+                    ) {
+                        Text("교환 수정 요청", fontSize = 12.sp)
+                    }
+                }
+                if (canCancel) {
+                    OutlinedButton(
+                        onClick = onRequestCancel,
+                        modifier = Modifier.weight(1f).height(38.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = PassColor)
+                    ) {
+                        Text("취소하기", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WantListRow(title: String, items: List<ClothingItem>) {
+    Column {
+        Text("$title (${items.size})", color = TextTertiary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        if (items.isEmpty()) {
+            Text("아직 고른 옷이 없어요", color = TextTertiary, fontSize = 11.sp)
+        } else {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(items, key = { it.id }) { item ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        AsyncImage(
+                            item.image, null,
+                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                        Text(item.name, color = TextSecondary, fontSize = 8.sp, maxLines = 1,
+                            modifier = Modifier.width(56.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModificationRequestDialog(
+    room: MatchRoom,
+    onDismiss: () -> Unit,
+    onSubmit: (List<Int>) -> Unit
+) {
+    // 수정 요청 시 미리 고를 아이템 — 기존 myWantList를 기본값으로 시작
+    var myCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
+    var selectedIds by remember { mutableStateOf(room.myWantList.map { it.id }.toSet()) }
+
+    LaunchedEffect(room.id) {
+        AppState.loadMatchRoomCandidates(room.id) { my, _ -> myCandidates = my }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("교환 수정 요청", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+        text = {
+            Column {
+                Text(
+                    "다시 받고 싶은 옷을 미리 골라서 요청할 수 있어요. ${room.partner.name}님이 그대로 수락하거나 다시 조정할 수 있어요.",
+                    color = TextSecondary, fontSize = 12.sp
+                )
+                Spacer(Modifier.height(10.dp))
+                val candidates = myCandidates
+                if (candidates == null) {
+                    Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = AccentYellow, modifier = Modifier.size(20.dp))
+                    }
+                } else {
+                    Column(Modifier.heightIn(max = 280.dp)) {
+                        candidates.forEach { item ->
+                            val checked = item.id in selectedIds
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable {
+                                        selectedIds = if (checked) selectedIds - item.id else selectedIds + item.id
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = checked,
+                                    onCheckedChange = { selectedIds = if (it) selectedIds + item.id else selectedIds - item.id },
+                                    colors = CheckboxDefaults.colors(checkedColor = AccentYellow)
+                                )
+                                AsyncImage(item.image, null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+                                Spacer(Modifier.width(8.dp))
+                                Text(item.name, color = TextPrimary, fontSize = 12.sp, maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSubmit(selectedIds.toList()) }) {
+                Text("수정 요청 보내기", color = AccentYellow, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = TextTertiary) } }
+    )
+}

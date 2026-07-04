@@ -40,6 +40,8 @@ object AppState {
     var isLoading by mutableStateOf(false)
         private set
     var errorMessage by mutableStateOf<String?>(null)
+    // 전역 안내 토스트(에러 아님) — 예: 실시간 교환 수정요청 알림. NavGraph에서 관찰해서 표시.
+    var infoMessage by mutableStateOf<String?>(null)
 
     val myCloset: SnapshotStateList<ClothingItem> = mutableStateListOf()
     val discoverCards: SnapshotStateList<ClothingItem> = mutableStateListOf()
@@ -48,6 +50,8 @@ object AppState {
     val sentLikes: SnapshotStateList<SentLike> = mutableStateListOf()
     val addresses: SnapshotStateList<Address> = mutableStateListOf()
     val pendingMatchNotifications: SnapshotStateList<MatchItem> = mutableStateListOf()
+    // ⚠️ 2026-07-04 추가, v0.1 설계 제안 단계(match-room-spec.md) — 백엔드 미배포.
+    val matchRooms: SnapshotStateList<MatchRoom> = mutableStateListOf()
 
     val hasDefaultAddress: Boolean get() = addresses.any { it.isDefault }
 
@@ -436,6 +440,202 @@ object AppState {
             .forEach { stale -> cancelExchange(stale.id) }
     }
 
+    // ── MatchRoom (2026-07-04 추가, v0.1 설계 제안 단계 — 백엔드 미배포) ──────
+    // ⚠️ match-room-spec.md 문서 기준으로 미리 구현해둔 것. 백엔드가 아직 배포 전이라
+    // 지금은 전부 실패(404 등)할 수 있음 — 실제 배포되면 라이브로 재검증 필요.
+    // ⚠️ 채팅 메시지(getMessages/sendMessage/markMessagesRead)는 문서에 별도 엔드포인트가
+    // 명시돼있지 않아서, "Exchange -> MatchRoom ID 계승 마이그레이션"(문서 10절) 전제로
+    // 기존 /api/exchanges/{id}/messages 를 roomId로 그대로 재사용한다고 가정함 — 확인 필요.
+
+    suspend fun loadMatchRooms() {
+        val res = apiCallRequired { api.getMatchRooms() }
+        matchRooms.clear()
+        matchRooms.addAll(res.matchRooms.map { it.toMatchRoom() })
+    }
+
+    fun refreshMatchRooms() { scope.launch { runCatching { loadMatchRooms() } } }
+
+    /** 선택 화면 진입 시 후보 목록(내가 좋아요한 상대 아이템들 / 참고용 상대가 좋아요한 내 아이템들) 조회 */
+    fun loadMatchRoomCandidates(
+        roomId: Int,
+        onResult: (myCandidates: List<ClothingItem>, theirCandidates: List<ClothingItem>) -> Unit
+    ) {
+        scope.launch {
+            try {
+                val res = apiCallRequired { api.getMatchRoomCandidates(roomId.toLong()) }
+                onResult(res.myCandidates.map { it.toClothingItem() }, res.theirCandidates.map { it.toClothingItem() })
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(emptyList(), emptyList())
+            }
+        }
+    }
+
+    /** 내 selected 목록 전체 교체 (SELECTING 상태에서만 가능) */
+    fun updateMatchRoomSelection(roomId: Int, itemIds: List<Int>, onResult: (Boolean) -> Unit = {}) {
+        scope.launch {
+            try {
+                val res = apiCallRequired {
+                    api.updateMatchRoomSelection(roomId.toLong(), SelectionRequest(itemIds.map { it.toLong() }))
+                }
+                replaceMatchRoom(res.toMatchRoom())
+                onResult(true)
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(false)
+            }
+        }
+    }
+
+    /** 내 선택 잠금 — 양쪽 다 하면 MATCHED로 전환 */
+    fun lockMatchRoomSelection(roomId: Int, onResult: (Boolean) -> Unit = {}) {
+        scope.launch {
+            try {
+                apiCall { api.lockMatchRoomSelection(roomId.toLong()) }
+                refreshMatchRoomDetail(roomId)
+                onResult(true)
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(false)
+            }
+        }
+    }
+
+    /** 배송지 확인 (기존 confirmExchange와 동일한 의미) */
+    fun confirmMatchRoom(roomId: Int, onResult: (ConfirmResult) -> Unit = {}) {
+        scope.launch {
+            try {
+                apiCall { api.confirmMatchRoom(roomId.toLong()) }
+                refreshMatchRoomDetail(roomId)
+                onResult(ConfirmResult.Success)
+            } catch (e: ApiException) {
+                if (e.errorBody?.code == "NOT_FOUND") {
+                    onResult(ConfirmResult.NeedsAddress)
+                } else {
+                    errorMessage = e.message
+                    onResult(ConfirmResult.Error(e.message ?: "배송지 확인에 실패했어요"))
+                }
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(ConfirmResult.Error(e.message ?: "배송지 확인에 실패했어요"))
+            }
+        }
+    }
+
+    fun shipMatchRoom(roomId: Int) {
+        scope.launch {
+            try {
+                apiCall { api.shipMatchRoom(roomId.toLong()) }
+                refreshMatchRoomDetail(roomId)
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    fun completeMatchRoom(roomId: Int) {
+        scope.launch {
+            try {
+                apiCall { api.completeMatchRoom(roomId.toLong()) }
+                refreshMatchRoomDetail(roomId)
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    /** SELECTING/MATCHED/CONFIRMED에서만 가능 */
+    fun cancelMatchRoom(roomId: Int, onResult: (Boolean) -> Unit = {}) {
+        scope.launch {
+            try {
+                apiCall { api.cancelMatchRoom(roomId.toLong()) }
+                val idx = matchRooms.indexOfFirst { it.id == roomId }
+                if (idx >= 0) matchRooms[idx] = matchRooms[idx].copy(status = MatchRoomStatus.CANCELLED)
+                onResult(true)
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(false)
+            }
+        }
+    }
+
+    /** SHIPPING 이전 상태에서만 가능 — 상태를 SELECTING으로 롤백. 성공 시 서버가 채팅 커스텀
+     *  메시지 + 상대방 토스트 + 알림을 알아서 발송해준다(문서 §6 기준). */
+    fun requestMatchRoomModification(roomId: Int, proposedItemIds: List<Int>, onResult: (Boolean) -> Unit = {}) {
+        scope.launch {
+            try {
+                apiCall {
+                    api.requestMatchRoomModification(roomId.toLong(), ModificationRequest(proposedItemIds.map { it.toLong() }))
+                }
+                refreshMatchRoomDetail(roomId)
+                onResult(true)
+            } catch (e: Exception) {
+                errorMessage = e.message
+                onResult(false)
+            }
+        }
+    }
+
+    private suspend fun refreshMatchRoomDetail(roomId: Int) {
+        try {
+            val res = apiCallRequired { api.getMatchRoom(roomId.toLong()) }
+            replaceMatchRoom(res.toMatchRoom())
+        } catch (e: Exception) {
+            errorMessage = e.message
+        }
+    }
+
+    private fun replaceMatchRoom(updated: MatchRoom) {
+        val idx = matchRooms.indexOfFirst { it.id == updated.id }
+        if (idx >= 0) {
+            matchRooms[idx] = updated.copy(messages = matchRooms[idx].messages)
+        } else {
+            matchRooms.add(0, updated)
+        }
+    }
+
+    fun loadMatchRoomMessages(roomId: Int) {
+        val room = matchRooms.firstOrNull { it.id == roomId } ?: return
+        scope.launch {
+            try {
+                val res = apiCallRequired { api.getMessages(roomId.toLong()) }
+                val msgs = res.messages.map { it.toChatMessage() }
+                room.messages.clear()
+                room.messages.addAll(msgs)
+                apiCall { api.markMessagesRead(roomId.toLong()) }
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    fun sendMatchRoomMessage(roomId: Int, text: String) {
+        if (text.isBlank()) return
+        val room = matchRooms.firstOrNull { it.id == roomId } ?: return
+        scope.launch {
+            try {
+                val res = apiCallRequired { api.sendMessage(roomId.toLong(), SendMessageRequest(text.trim())) }
+                appendIncomingRoomMessage(roomId, res.toChatMessage())
+            } catch (e: Exception) {
+                errorMessage = e.message
+            }
+        }
+    }
+
+    fun appendIncomingRoomMessage(roomId: Int, message: ChatMessage) {
+        val room = matchRooms.firstOrNull { it.id == roomId } ?: return
+        if (room.messages.none { it.id == message.id }) {
+            room.messages.add(message)
+        }
+    }
+
+    /** ChatSocketManager가 WS exchange_modification_requested 이벤트를 받으면 호출.
+     *  화면과 무관하게 즉시 토스트를 띄우고, 방 최신 상태를 백그라운드로 재조회한다. */
+    fun onModificationRequestedRealtime(roomId: Int, requesterName: String) {
+        infoMessage = "${requesterName}님이 교환 수정을 요청했어요. 확인해보세요!"
+        scope.launch { runCatching { refreshMatchRoomDetail(roomId) } }
+    }
+
     // ── 주소 ─────────────────────────────────────────────────────────
     fun addAddress(
         address1: String,
@@ -762,6 +962,7 @@ object AppState {
             unreadNotificationCount = 0
             searchResults.clear()
             pendingReviewScores.clear()
+            matchRooms.clear()
         }
     }
 }

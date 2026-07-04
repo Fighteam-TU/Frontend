@@ -95,6 +95,21 @@ object ChatSocketManager {
                     val message = gson.fromJson(messageJson, MessageResponse::class.java) ?: return
                     mainScope.launch {
                         AppState.appendIncomingMessage(exchangeId, message.toChatMessage())
+                        AppState.appendIncomingRoomMessage(exchangeId, message.toChatMessage())
+                    }
+                }
+                // ⚠️ 2026-07-04 추가, v0.1 설계 제안(match-room-spec.md §8) — 백엔드 미배포.
+                // 문서상 이 이벤트는 "해당 유저의 모든 활성 연결"에 브로드캐스트된다고 돼있어서,
+                // 지금처럼 특정 방에 join한 소켓 하나만으로는 다른 방에서 온 이벤트를 놓칠 수 있음
+                // (지금 구조는 화면별로 그때그때 연결하는 방식이라 상시 연결이 아님) — 실제 배포되면
+                // 소켓 연결 유지 전략을 앱 전역으로 바꿀지 재검토 필요.
+                "exchange_modification_requested" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val requestedBy = data["requestedBy"] as? Map<String, Any?>
+                    val roomId = (data["roomId"] as? Number)?.toInt() ?: exchangeId
+                    val requesterName = requestedBy?.get("nickname") as? String ?: "상대방"
+                    mainScope.launch {
+                        AppState.onModificationRequestedRealtime(roomId, requesterName)
                     }
                 }
                 // user_typing / user_stop_typing / messages_read는 필요해지면 여기서 확장

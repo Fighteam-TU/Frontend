@@ -184,4 +184,52 @@ interface ApiService {
         @Query("page") page: Int = 1,
         @Query("limit") limit: Int = 20
     ): ApiResponse<ItemListEnvelope>
+
+    // ── MatchRoom (2026-07-04 추가, v0.1 설계 제안 단계 — 백엔드 미배포) ──────
+    // ⚠️ match-room-spec.md 문서 기준. 실제 배포 전까지 전부 404가 날 수 있음.
+    /** status: all | SELECTING | MATCHED | CONFIRMED | SHIPPING | COMPLETE | CANCELLED */
+    @GET("/api/match-rooms")
+    suspend fun getMatchRooms(
+        @Query("status") status: String = "all",
+        @Query("page") page: Int = 1,
+        @Query("limit") limit: Int = 20
+    ): ApiResponse<MatchRoomListEnvelope>
+
+    @GET("/api/match-rooms/{roomId}")
+    suspend fun getMatchRoom(@Path("roomId") roomId: Long): ApiResponse<MatchRoomResponse>
+
+    /** 내가 selected에 담을 수 있는 후보(=내가 좋아요한 상대 아이템들) 조회 */
+    @GET("/api/match-rooms/{roomId}/candidates")
+    suspend fun getMatchRoomCandidates(@Path("roomId") roomId: Long): ApiResponse<MatchRoomCandidatesResponse>
+
+    /** 내 selected 목록 전체 교체 (SELECTING 상태에서만 가능) */
+    @PATCH("/api/match-rooms/{roomId}/selection")
+    suspend fun updateMatchRoomSelection(
+        @Path("roomId") roomId: Long,
+        @Body body: SelectionRequest
+    ): ApiResponse<MatchRoomResponse>
+
+    /** 내 선택 잠금 — 양쪽 다 하면 MATCHED로 전환 */
+    @PATCH("/api/match-rooms/{roomId}/lock-selection")
+    suspend fun lockMatchRoomSelection(@Path("roomId") roomId: Long): ApiResponse<MatchRoomActionResponse>
+
+    @PATCH("/api/match-rooms/{roomId}/confirm")
+    suspend fun confirmMatchRoom(@Path("roomId") roomId: Long): ApiResponse<MatchRoomActionResponse>
+
+    @PATCH("/api/match-rooms/{roomId}/ship")
+    suspend fun shipMatchRoom(@Path("roomId") roomId: Long): ApiResponse<MatchRoomActionResponse>
+
+    @PATCH("/api/match-rooms/{roomId}/complete")
+    suspend fun completeMatchRoom(@Path("roomId") roomId: Long): ApiResponse<MatchRoomActionResponse>
+
+    /** SELECTING/MATCHED/CONFIRMED에서만 가능 */
+    @PATCH("/api/match-rooms/{roomId}/cancel")
+    suspend fun cancelMatchRoom(@Path("roomId") roomId: Long): ApiResponse<MatchRoomActionResponse>
+
+    /** SHIPPING 이전 상태에서만 가능 — 상태를 SELECTING으로 롤백 */
+    @PATCH("/api/match-rooms/{roomId}/request-modification")
+    suspend fun requestMatchRoomModification(
+        @Path("roomId") roomId: Long,
+        @Body body: ModificationRequest
+    ): ApiResponse<MatchRoomActionResponse>
 }
