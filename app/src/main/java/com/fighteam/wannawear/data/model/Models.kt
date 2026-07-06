@@ -130,6 +130,8 @@ data class MatchRoom(
     val myReceived: Boolean = false,
     val theirReceived: Boolean = false,
     val partnerAddress: String? = null,
+    // status == CANCELLED 일 때만 의미 있음 (true=내가 취소, false=상대방이 취소)
+    val cancelledByMe: Boolean? = null,
     val modificationRequestedByMe: Boolean = false,
     val modificationRequestedByThem: Boolean = false,
     val modificationProposedItemIds: List<Int> = emptyList()
@@ -142,7 +144,7 @@ data class MatchRoom(
 enum class NotificationType {
     EXCHANGE_MATCHED, NEW_MESSAGE, ADDRESS_CONFIRMED, ITEM_SHIPPED,
     SHIPPING_STARTED, ITEM_RECEIVED, EXCHANGE_COMPLETED,
-    EXCHANGE_MODIFICATION_REQUESTED, // 2026-07-04 추가 (match-room-spec.md §9)
+    EXCHANGE_MODIFICATION_REQUEST, // v1.0 확정 스펙 §9 — 초안(v0.1)엔 REQUESTED로 있었으나 최종은 REQUEST
     UNKNOWN // 서버가 향후 새 타입을 추가해도 파싱 실패 없이 무시하고 넘어가기 위한 폴백
 }
 

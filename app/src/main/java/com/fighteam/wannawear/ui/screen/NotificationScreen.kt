@@ -123,7 +123,7 @@ private fun iconFor(type: NotificationType): String = when (type) {
     NotificationType.SHIPPING_STARTED   -> "🚚"
     NotificationType.ITEM_RECEIVED      -> "✅"
     NotificationType.EXCHANGE_COMPLETED -> "🎉"
-    NotificationType.EXCHANGE_MODIFICATION_REQUESTED -> "🔄" // 2026-07-04 추가 (match-room-spec.md §9)
+    NotificationType.EXCHANGE_MODIFICATION_REQUEST -> "🔄" // v1.0 확정 스펙 §9
     NotificationType.UNKNOWN            -> "🔔"
 }
 

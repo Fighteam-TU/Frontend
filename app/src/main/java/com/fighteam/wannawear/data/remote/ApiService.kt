@@ -185,8 +185,8 @@ interface ApiService {
         @Query("limit") limit: Int = 20
     ): ApiResponse<ItemListEnvelope>
 
-    // ── MatchRoom (2026-07-04 추가, v0.1 설계 제안 단계 — 백엔드 미배포) ──────
-    // ⚠️ match-room-spec.md 문서 기준. 실제 배포 전까지 전부 404가 날 수 있음.
+    // ── MatchRoom (2026-07-04 추가, v1.0 확정 스펙 — 백엔드 구현/배포/E2E검증 완료) ──
+    // ⚠️ match-room-spec.md v1.0 기준. roomId는 기존 exchangeId와 같은 값(같은 테이블/row 공유).
     /** status: all | SELECTING | MATCHED | CONFIRMED | SHIPPING | COMPLETE | CANCELLED */
     @GET("/api/match-rooms")
     suspend fun getMatchRooms(
@@ -232,4 +232,22 @@ interface ApiService {
         @Path("roomId") roomId: Long,
         @Body body: ModificationRequest
     ): ApiResponse<MatchRoomActionResponse>
+
+    // ⚠️ v1.0 확정 스펙 §6: 기존 ChatService를 그대로 위임하는 것뿐이라 동작은 100% 동일하지만,
+    // 경로가 명시적으로 제공됨 — /api/exchanges/... 대신 이걸 쓴다.
+    @GET("/api/match-rooms/{roomId}/messages")
+    suspend fun getMatchRoomMessages(
+        @Path("roomId") roomId: Long,
+        @Query("before") before: Long? = null,
+        @Query("limit") limit: Int = 50
+    ): ApiResponse<MessageListEnvelope>
+
+    @POST("/api/match-rooms/{roomId}/messages")
+    suspend fun sendMatchRoomMessage(
+        @Path("roomId") roomId: Long,
+        @Body body: SendMessageRequest
+    ): ApiResponse<MessageResponse>
+
+    @PATCH("/api/match-rooms/{roomId}/messages/read")
+    suspend fun markMatchRoomMessagesRead(@Path("roomId") roomId: Long): ApiResponse<ReadResponse>
 }

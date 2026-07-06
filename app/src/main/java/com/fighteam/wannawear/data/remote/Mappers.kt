@@ -203,14 +203,14 @@ private fun emptyClothingItem(): ClothingItem = ClothingItem(
     user = User(0, "", 0, "")
 )
 
-/** MatchRoom (2026-07-04 추가, v0.1 설계 제안 단계) */
+/** MatchRoom (2026-07-04 추가, v1.0 확정 스펙 — 백엔드 구현/배포/E2E검증 완료) */
 fun MatchRoomResponse.toMatchRoom(): MatchRoom = MatchRoom(
     id             = id.toClientId(),
     partner        = partner?.toUser() ?: User(0, "알 수 없음", 0, ""),
     status         = parseMatchRoomStatus(status),
     myWantList     = myWantList?.map { it.toClothingItem() } ?: emptyList(),
     theirWantList  = theirWantList?.map { it.toClothingItem() } ?: emptyList(),
-    date           = formatRelativeDate(updatedAt ?: createdAt),
+    date           = formatRelativeDate(matchedAt),
     messages       = mutableStateListOf(),
     myLockedSelection    = myLockedSelection ?: false,
     theirLockedSelection = theirLockedSelection ?: false,
@@ -221,6 +221,7 @@ fun MatchRoomResponse.toMatchRoom(): MatchRoom = MatchRoom(
     myReceived     = myReceived ?: false,
     theirReceived  = theirReceived ?: false,
     partnerAddress = partnerAddress,
+    cancelledByMe  = cancelledByMe,
     modificationRequestedByMe   = modificationRequestedByMe ?: false,
     modificationRequestedByThem = modificationRequestedByThem ?: false,
     modificationProposedItemIds = modificationProposedItemIds?.map { it.toClientId() } ?: emptyList()

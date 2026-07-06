@@ -26,14 +26,16 @@ data class MatchRoomResponse(
     val theirReceived: Boolean? = null,
 
     val partnerAddress: String? = null,
+    // status == CANCELLED 일 때만 의미 있음 (true=내가 취소, false=상대방이 취소)
+    val cancelledByMe: Boolean? = null,
 
     val modificationRequestedByMe: Boolean? = null,
     val modificationRequestedByThem: Boolean? = null,
     val modificationProposedItemIds: List<Long>? = null,
 
     val lastMessage: LastMessageDto? = null,
-    val createdAt: String? = null,
-    val updatedAt: String? = null
+    // ⚠️ v1.0 확정 스펙: createdAt/updatedAt이 아니라 matchedAt 하나만 내려옴 (ExchangeResponse와 동일한 필드명)
+    val matchedAt: String? = null
 )
 
 // ⚠️ 목록 응답의 정확한 wrapper 키 이름이 문서에 명시돼 있지 않아 기존 컨벤션(exchanges, notifications 등)에

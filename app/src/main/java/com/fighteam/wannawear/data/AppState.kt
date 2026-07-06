@@ -308,6 +308,15 @@ object AppState {
                         onResult(MatchResult.Matched(match))
                         return@launch
                     }
+                    // ⚠️ v1.0 MatchRoom 스펙: matched=false여도 roomId가 있으면 "이미 진행 중인
+                    // 매칭방의 선택 목록에 조용히 추가됨"이라는 뜻(문서 10절). 별도 팝업 없이,
+                    // 그 방을 이미 알고 있다면 백그라운드로 최신화해둔다.
+                    if (res.roomId != null) {
+                        val roomId = res.roomId.toClientId()
+                        if (matchRooms.any { it.id == roomId }) {
+                            scope.launch { runCatching { refreshMatchRoomDetail(roomId) } }
+                        }
+                    }
                     onResult(MatchResult.Liked)
                 } else {
                     sentLikes.removeAll { it.item.id == targetItem.id }
@@ -440,12 +449,9 @@ object AppState {
             .forEach { stale -> cancelExchange(stale.id) }
     }
 
-    // ── MatchRoom (2026-07-04 추가, v0.1 설계 제안 단계 — 백엔드 미배포) ──────
-    // ⚠️ match-room-spec.md 문서 기준으로 미리 구현해둔 것. 백엔드가 아직 배포 전이라
-    // 지금은 전부 실패(404 등)할 수 있음 — 실제 배포되면 라이브로 재검증 필요.
-    // ⚠️ 채팅 메시지(getMessages/sendMessage/markMessagesRead)는 문서에 별도 엔드포인트가
-    // 명시돼있지 않아서, "Exchange -> MatchRoom ID 계승 마이그레이션"(문서 10절) 전제로
-    // 기존 /api/exchanges/{id}/messages 를 roomId로 그대로 재사용한다고 가정함 — 확인 필요.
+    // ── MatchRoom (2026-07-04 추가, v1.0 확정 스펙 — 백엔드 구현/배포/E2E검증 완료) ──
+    // ⚠️ match-room-spec.md v1.0 기준. roomId==exchangeId(같은 테이블/row 공유), 채팅도
+    // 전용 엔드포인트(getMatchRoomMessages 등)로 확정됨.
 
     suspend fun loadMatchRooms() {
         val res = apiCallRequired { api.getMatchRooms() }
@@ -471,7 +477,9 @@ object AppState {
         }
     }
 
-    /** 내 selected 목록 전체 교체 (SELECTING 상태에서만 가능) */
+    /** 내 selected 목록 전체 교체 (SELECTING 상태에서만 가능).
+     *  ⚠️ v1.0 확정: 이미 잠근 상태에서 다시 호출하면 내 잠금(myLockedSelection)이 서버에서
+     *  자동으로 풀림 — 별도 "잠금 해제" API 없음(문서 6절). 응답을 그대로 반영하면 알아서 처리됨. */
     fun updateMatchRoomSelection(roomId: Int, itemIds: List<Int>, onResult: (Boolean) -> Unit = {}) {
         scope.launch {
             try {
@@ -480,6 +488,14 @@ object AppState {
                 }
                 replaceMatchRoom(res.toMatchRoom())
                 onResult(true)
+            } catch (e: ApiException) {
+                errorMessage = when (e.errorBody?.code) {
+                    "ITEM_IN_EXCHANGE"          -> "이미 다른 방에서 진행 중인 아이템이 포함돼 있어요"
+                    "ITEM_NOT_IN_CANDIDATES"    -> "선택할 수 없는 아이템이 포함돼 있어요"
+                    "EXCHANGE_STATUS_INVALID"   -> "지금은 선택을 바꿀 수 없는 상태예요"
+                    else -> e.message
+                }
+                onResult(false)
             } catch (e: Exception) {
                 errorMessage = e.message
                 onResult(false)
@@ -494,6 +510,13 @@ object AppState {
                 apiCall { api.lockMatchRoomSelection(roomId.toLong()) }
                 refreshMatchRoomDetail(roomId)
                 onResult(true)
+            } catch (e: ApiException) {
+                errorMessage = when (e.errorBody?.code) {
+                    "EMPTY_SELECTION"         -> "받고 싶은 옷을 하나 이상 골라주세요"
+                    "EXCHANGE_STATUS_INVALID" -> "지금은 선택을 잠글 수 없는 상태예요"
+                    else -> e.message
+                }
+                onResult(false)
             } catch (e: Exception) {
                 errorMessage = e.message
                 onResult(false)
@@ -569,6 +592,12 @@ object AppState {
                 }
                 refreshMatchRoomDetail(roomId)
                 onResult(true)
+            } catch (e: ApiException) {
+                errorMessage = when (e.errorBody?.code) {
+                    "MODIFICATION_NOT_ALLOWED" -> "이미 발송된 교환은 수정 요청을 할 수 없어요"
+                    else -> e.message
+                }
+                onResult(false)
             } catch (e: Exception) {
                 errorMessage = e.message
                 onResult(false)
@@ -598,11 +627,11 @@ object AppState {
         val room = matchRooms.firstOrNull { it.id == roomId } ?: return
         scope.launch {
             try {
-                val res = apiCallRequired { api.getMessages(roomId.toLong()) }
+                val res = apiCallRequired { api.getMatchRoomMessages(roomId.toLong()) }
                 val msgs = res.messages.map { it.toChatMessage() }
                 room.messages.clear()
                 room.messages.addAll(msgs)
-                apiCall { api.markMessagesRead(roomId.toLong()) }
+                apiCall { api.markMatchRoomMessagesRead(roomId.toLong()) }
             } catch (e: Exception) {
                 errorMessage = e.message
             }
@@ -614,7 +643,7 @@ object AppState {
         val room = matchRooms.firstOrNull { it.id == roomId } ?: return
         scope.launch {
             try {
-                val res = apiCallRequired { api.sendMessage(roomId.toLong(), SendMessageRequest(text.trim())) }
+                val res = apiCallRequired { api.sendMatchRoomMessage(roomId.toLong(), SendMessageRequest(text.trim())) }
                 appendIncomingRoomMessage(roomId, res.toChatMessage())
             } catch (e: Exception) {
                 errorMessage = e.message
