@@ -285,8 +285,12 @@ private fun MatchRoomCard(
         MatchRoomStatus.COMPLETE  -> Pair(StatusComplete, StatusComplete.copy(alpha = 0.12f))
         MatchRoomStatus.CANCELLED -> Pair(TextTertiary, TextTertiary.copy(alpha = 0.12f))
     }
-    val canRequestModification = room.status == MatchRoomStatus.SELECTING ||
-        room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED
+    // ⚠️ 라이브 검증(2026-07-08): SELECTING 상태에서 request-modification을 호출하면 서버가
+    // MODIFICATION_NOT_ALLOWED로 거절함(메시지는 "배송 시작 이후..."라고 잘못 나오지만).
+    // 생각해보면 SELECTING에선 "아이템 선택하기"로 그냥 다시 고르면 되니 수정요청이 필요 없음 —
+    // 잠긴 이후(MATCHED/CONFIRMED)에만 버튼을 노출한다. 이게 사용자가 봤던
+    // "발송 안 했는데 이미 발송된 교환이라고 뜨는" 에러의 실제 원인이었음.
+    val canRequestModification = room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED
     val canCancel = room.status != MatchRoomStatus.COMPLETE && room.status != MatchRoomStatus.CANCELLED
 
     Column(
