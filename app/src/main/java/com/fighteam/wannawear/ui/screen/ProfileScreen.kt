@@ -26,7 +26,6 @@ import com.fighteam.wannawear.ui.theme.*
 fun ProfileScreen(
     onNavigateToAddress: () -> Unit = {},
     onNavigateToEditProfile: () -> Unit = {},
-    onNavigateToMatchRooms: () -> Unit = {},
     onLogout: () -> Unit = {}
 ) {
     val me = AppState.myProfile
@@ -189,7 +188,6 @@ fun ProfileScreen(
                 "프로필 수정" to onNavigateToEditProfile,
                 "배송지 관리" to onNavigateToAddress,
                 "교환 내역" to {},
-                "매칭룸 (베타)" to onNavigateToMatchRooms,
                 "설정" to {}
             ).forEach { (label, onClick) ->
                 Row(

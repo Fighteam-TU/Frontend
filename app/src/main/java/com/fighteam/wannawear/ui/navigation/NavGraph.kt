@@ -34,8 +34,8 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object EditProfile   : Screen("edit_profile",       "프로필 수정", Icons.Default.Edit)
     object Notifications : Screen("notifications",      "알림", Icons.Default.Notifications)
     object Search        : Screen("search",             "검색", Icons.Default.Search)
-    // ⚠️ 2026-07-04 추가, v0.1 설계 제안 단계(match-room-spec.md) — 백엔드 미배포.
-    object MatchRooms    : Screen("match_rooms",        "매칭룸(베타)", Icons.Default.Favorite)
+    // ⚠️ 2026-07-04 추가, v1.0 확정 스펙(match-room-spec.md) — 백엔드 배포/검증 완료.
+    // 2026-07-05: 별도 "매칭룸(베타)" 메뉴 없애고 기존 "매칭" 탭 자체를 MatchRoom 기반으로 전환함.
     object MatchRoomSelect : Screen("match_room_select/{roomId}", "아이템 선택", Icons.Default.Checklist)
 }
 
@@ -43,7 +43,7 @@ val bottomNavItems = listOf(Screen.Discover, Screen.Matches, Screen.Closet, Scre
 
 private val hideBottomBarPrefixes = listOf(
     "add_item", "chat/", "shipping/", "address_manage", "edit_profile", "notifications", "search",
-    "match_rooms", "match_room_select/"
+    "match_room_select/"
 )
 
 @Composable
@@ -168,9 +168,9 @@ fun WannaWearNavGraph() {
                 )
             }
             composable(Screen.Matches.route) {
-                MatchesScreen(
-                    onOpenChat          = { matchId -> navController.navigate("chat/$matchId") },
-                    onOpenShippingGuide = { matchId -> navController.navigate("shipping/$matchId") }
+                MatchRoomsScreen(
+                    onOpenChat    = { roomId -> navController.navigate("chat/$roomId") },
+                    onSelectItems = { roomId -> navController.navigate("match_room_select/$roomId") }
                 )
             }
             composable(Screen.Closet.route) {
@@ -180,7 +180,6 @@ fun WannaWearNavGraph() {
                 ProfileScreen(
                     onNavigateToAddress = { navController.navigate(Screen.AddressManage.route) },
                     onNavigateToEditProfile = { navController.navigate(Screen.EditProfile.route) },
-                    onNavigateToMatchRooms = { navController.navigate(Screen.MatchRooms.route) },
                     onLogout = {
                         AppState.logout()
                         isLoggedIn = false
@@ -216,15 +215,6 @@ fun WannaWearNavGraph() {
             composable("shipping/{matchId}") { back ->
                 val matchId = back.arguments?.getString("matchId")?.toIntOrNull() ?: return@composable
                 ShippingGuideScreen(matchId = matchId, onBack = { navController.popBackStack() })
-            }
-            // ⚠️ 2026-07-04 추가, v0.1 설계 제안 단계 — 백엔드 미배포. 프로필 탭 "매칭룸(베타)"
-            // 메뉴로만 진입 가능하게 해두고, 기존 "매칭" 탭(Exchange 기반)은 그대로 유지함.
-            composable(Screen.MatchRooms.route) {
-                MatchRoomsScreen(
-                    onBack     = { navController.popBackStack() },
-                    onOpenChat = { roomId -> navController.navigate("chat/$roomId") },
-                    onSelectItems = { roomId -> navController.navigate("match_room_select/$roomId") }
-                )
             }
             composable("match_room_select/{roomId}") { back ->
                 val roomId = back.arguments?.getString("roomId")?.toIntOrNull() ?: return@composable
