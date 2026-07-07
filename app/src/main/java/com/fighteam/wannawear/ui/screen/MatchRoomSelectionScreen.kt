@@ -36,7 +36,16 @@ import com.fighteam.wannawear.ui.theme.*
 fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
     val room = AppState.matchRooms.firstOrNull { it.id == roomId }
     var candidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
-    var selectedIds by remember(room?.id) { mutableStateOf(room?.myWantList?.map { it.id }?.toSet() ?: emptySet()) }
+    // ✅ 상대가 "교환 수정 요청"으로 특정 구성(내가 받아갔으면 하는 상대의 옷들)을 제안한 상태라면,
+    //    제안된 아이템들이 미리 체크된 상태로 시작한다 — 그대로 저장하면 제안 수락과 같은 효과.
+    val proposedByThem = room?.takeIf { it.modificationRequestedByThem }
+        ?.modificationProposedItemIds?.toSet() ?: emptySet()
+    var selectedIds by remember(room?.id) {
+        mutableStateOf(
+            if (proposedByThem.isNotEmpty()) proposedByThem
+            else room?.myWantList?.map { it.id }?.toSet() ?: emptySet()
+        )
+    }
     var isSaving by remember { mutableStateOf(false) }
 
     LaunchedEffect(roomId) {
@@ -80,22 +89,39 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
                         Text("아직 좋아요한 옷이 없어요", color = TextSecondary, fontSize = 13.sp)
                     }
                 }
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement   = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(list, key = { it.id }) { item ->
-                        val selected = item.id in selectedIds
-                        SelectableCandidateCard(
-                            item = item,
-                            selected = selected,
-                            onToggle = {
-                                selectedIds = if (selected) selectedIds - item.id else selectedIds + item.id
-                            }
-                        )
+                else -> Column {
+                    // 상대의 수정 제안이 반영된 상태임을 알려주는 배너
+                    if (proposedByThem.isNotEmpty()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                                .background(AccentYellow.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${room?.partner?.name}님이 제안한 구성이 미리 체크돼 있어요 · 그대로 저장하거나 자유롭게 바꿔보세요",
+                                color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement   = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(list, key = { it.id }) { item ->
+                            val selected = item.id in selectedIds
+                            SelectableCandidateCard(
+                                item = item,
+                                selected = selected,
+                                onToggle = {
+                                    selectedIds = if (selected) selectedIds - item.id else selectedIds + item.id
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -105,12 +131,16 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
             Button(
                 onClick = {
                     isSaving = true
-                    AppState.updateMatchRoomSelection(roomId, selectedIds.toList()) { success ->
+                    // ⚠️ 제안받은 아이템 중 후보 목록에 없는 것(내가 좋아요한 적 없는 옷 등)이 섞여
+                    // 있으면 서버가 ITEM_NOT_IN_CANDIDATES로 거절하므로, 화면에 실제로 보이는(=선택
+                    // 가능한) 아이템만 걸러서 저장한다.
+                    val availableIds = (mergedList ?: emptyList()).map { it.id }.toSet()
+                    AppState.updateMatchRoomSelection(roomId, selectedIds.filter { it in availableIds }) { success ->
                         isSaving = false
                         if (success) onBack()
                     }
                 },
-                enabled  = !isSaving,
+                enabled  = !isSaving && mergedList != null,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape    = RoundedCornerShape(14.dp),
                 colors   = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText)

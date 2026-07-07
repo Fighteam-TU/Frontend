@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,14 +61,20 @@ fun MatchRoomsScreen(
     // ⚠️ 2026-07-07 추가 — 교환 개수(내가 받을 옷 개수 vs 상대가 받을 옷 개수)가 다른 채로 잠그면
     // 한쪽이 더 많이/적게 받는 불공정한 교환이 될 수 있어서, 잠그기 직전에 한 번 더 확인시킨다.
     var lockConfirmRoomId by remember { mutableStateOf<Int?>(null) }
-    var selectedFilter by remember { mutableStateOf(RoomFilter.ALL) }
+    // ✅ 탭/화면 이동 후 돌아와도 보고 있던 필터 유지 (remember는 백스택 복귀 시 초기화됨)
+    var selectedFilter by rememberSaveable { mutableStateOf(RoomFilter.ALL) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { AppState.refreshMatchRooms() }
 
-    val filteredRooms = rooms.filter { it.matchesFilter(selectedFilter) }
     val duplicateGroups = AppState.duplicateActiveRoomGroups()
     var mergingRoomId by remember { mutableStateOf<Int?>(null) }
+    // ✅ 요청사항: 같은 상대에 대해 카드를 여러 개 만들지 않는다 — 중복 방(백엔드 버그로 생성됨)이
+    //    있어도 목록에는 가장 최근 방 하나만 보여주고, 나머지는 상단 배너의 "합치기"로 정리하게 한다.
+    val hiddenDuplicateIds = duplicateGroups
+        .flatMap { group -> group.sortedByDescending { it.id }.drop(1) }
+        .map { it.id }.toSet()
+    val filteredRooms = rooms.filter { it.matchesFilter(selectedFilter) && it.id !in hiddenDuplicateIds }
 
     addressPromptRoomId?.let { roomId ->
         AddressPromptDialog(
@@ -184,7 +191,7 @@ fun MatchRoomsScreen(
                         "${partner.name}님과 매칭방이 ${group.size}개 있어요",
                         color = PassColor, fontSize = 12.sp, fontWeight = FontWeight.Bold
                     )
-                    Text("내가 고른 옷은 하나로 합칠 수 있어요 (상대가 고른 옷은 상대가 다시 골라야 해요)", color = TextSecondary, fontSize = 10.sp)
+                    Text("목록엔 최신 방 하나만 보여드리고 있어요 · 합치면 내 선택이 한 방으로 모여요", color = TextSecondary, fontSize = 10.sp)
                 }
                 Spacer(Modifier.width(8.dp))
                 val primary = group.maxByOrNull { it.id }!!
@@ -289,7 +296,16 @@ private fun MatchRoomCard(
             AsyncImage(room.partner.avatar, null, modifier = Modifier.size(36.dp).clip(CircleShape), contentScale = ContentScale.Crop)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(room.partner.name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(room.partner.name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    // ✅ 상대 평점(매너온도)을 카드에서 바로 볼 수 있게 (서버 mannerScore가 있을 때만)
+                    room.partner.mannerScore?.let { score ->
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.Star, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(11.dp))
+                        Spacer(Modifier.width(2.dp))
+                        Text(String.format("%.1f", score), color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
                 Text(room.date, color = TextSecondary, fontSize = 10.sp)
             }
             Text(
@@ -675,19 +691,22 @@ private fun ModificationRequestDialog(
     onDismiss: () -> Unit,
     onSubmit: (List<Int>) -> Unit
 ) {
-    // 수정 요청 시 미리 고를 아이템 — 기존 myWantList를 기본값으로 시작
-    var myCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
-    var selectedIds by remember { mutableStateOf(room.myWantList.map { it.id }.toSet()) }
+    // ✅ 2026-07-08 의미 수정: "교환 수정 요청"은 **상대에게 넘길 내 옷 구성**을 바꿔달라는 요청이다
+    //    (예: "내 옷은 이 2개로 교환하고 싶어요"). 예전엔 반대로 "내가 받고 싶은 상대 옷"을 고르게
+    //    돼있었음 — 그래서 후보도 상대 아이템(myCandidates)이 아니라 내 아이템(theirCandidates:
+    //    상대가 좋아요한 내 옷들)을 보여주고, 현재 상대가 받기로 돼있는 목록(theirWantList)을
+    //    기본 체크로 시작한다. 상대는 이 제안을 받으면 재선택 화면에서 제안된 옷들이 미리 체크된
+    //    상태로 보게 된다(MatchRoomSelectionScreen 참고).
+    var myItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
+    var selectedIds by remember { mutableStateOf(room.theirWantList.map { it.id }.toSet()) }
 
     LaunchedEffect(room.id) {
-        AppState.loadMatchRoomCandidates(room.id) { my, _ -> myCandidates = my }
+        AppState.loadMatchRoomCandidates(room.id) { _, their -> myItemCandidates = their }
     }
 
-    // ⚠️ 버그 수정: 서버 candidates는 "새로 고를 수 있는 후보"만 주고, 이미 이 방에 잠긴/선택된
-    // 아이템(room.myWantList)은 candidates에서 빠져있을 수 있음(MatchRoomSelectionScreen과 동일한
-    // 문제). 그래서 이미 선택된 옷은 목록에 아예 안 보여서 체크(포함)도 해제도 못 했음 — 이미 선택된
-    // 것 + 새 후보를 합쳐서 전부 체크 가능하게 한다.
-    val mergedCandidates = myCandidates?.let { base -> (room.myWantList + base).distinctBy { it.id } }
+    // ⚠️ 서버 candidates는 "새로 고를 수 있는 후보"만 주고, 이미 이 방에서 상대가 받기로 한
+    // 내 아이템(room.theirWantList)은 빠져있을 수 있음 — 합쳐서 전부 체크/해제 가능하게 한다.
+    val mergedCandidates = myItemCandidates?.let { base -> (room.theirWantList + base).distinctBy { it.id } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -695,7 +714,7 @@ private fun ModificationRequestDialog(
         text = {
             Column {
                 Text(
-                    "다시 받고 싶은 옷을 미리 골라서 요청할 수 있어요. ${room.partner.name}님이 그대로 수락하거나 다시 조정할 수 있어요.",
+                    "${room.partner.name}님에게 넘길 내 옷 구성을 다시 골라서 제안할 수 있어요. 상대방이 확인하면 제안한 옷들이 미리 선택된 상태로 다시 고르게 돼요.",
                     color = TextSecondary, fontSize = 12.sp
                 )
                 Spacer(Modifier.height(10.dp))
@@ -704,6 +723,11 @@ private fun ModificationRequestDialog(
                     Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = AccentYellow, modifier = Modifier.size(20.dp))
                     }
+                } else if (candidates.isEmpty()) {
+                    Text(
+                        "상대가 좋아요한 내 옷이 아직 없어서 제안할 수 있는 옷이 없어요.",
+                        color = TextTertiary, fontSize = 12.sp
+                    )
                 } else {
                     Column(Modifier.heightIn(max = 280.dp)) {
                         candidates.forEach { item ->

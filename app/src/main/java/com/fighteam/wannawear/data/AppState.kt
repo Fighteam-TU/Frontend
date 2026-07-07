@@ -594,7 +594,12 @@ object AppState {
                 onResult(true)
             } catch (e: ApiException) {
                 errorMessage = when (e.errorBody?.code) {
-                    "MODIFICATION_NOT_ALLOWED" -> "이미 발송된 교환은 수정 요청을 할 수 없어요"
+                    // ⚠️ 예전엔 이 코드를 무조건 "이미 발송된 교환은..."으로 번역했는데, 실측 결과
+                    // 아직 발송 전(SELECTING)인 방에서도 이 코드가 내려오는 경우가 있었음(원인은
+                    // 백엔드 확인 필요 — backend-전달사항.md 기록). 서버가 준 메시지를 우선 보여주고,
+                    // 없을 때만 일반적인 안내로 대체한다.
+                    "MODIFICATION_NOT_ALLOWED" ->
+                        e.errorBody.message ?: "지금은 수정 요청을 할 수 없는 상태예요"
                     else -> e.message
                 }
                 onResult(false)

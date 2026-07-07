@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,7 +58,9 @@ fun ClosetScreen(
     onNavigateToAdd: () -> Unit = {},
     onNavigateToMatchRoomSelect: (Int) -> Unit = {}
 ) {
-    var selectedTab by remember { mutableStateOf(ClosetTab.MY_CLOSET) }
+    // ✅ 다른 화면(아이템 추가/선택 등)에 다녀와도 보고 있던 탭 유지 — remember는 백스택 복귀 시
+    //    컴포저블이 재생성되면서 초기값(내 옷장)으로 돌아가는 문제가 있었음.
+    var selectedTab by rememberSaveable { mutableStateOf(ClosetTab.MY_CLOSET) }
     var viewingGroup by remember { mutableStateOf<Pair<ClothingItem, List<User>>?>(null) }
     var detailItem by remember { mutableStateOf<ClothingItem?>(null) }
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
@@ -194,7 +197,9 @@ fun ClosetScreen(
                                 !AppState.hasActiveOrCompletedExchangeWith(it.myItem.id, it.fromUser.id) &&
                                 AppState.activeMatchRoomWith(it.fromUser.id) == null
                         } + AppState.activeMatchRooms().size
-                    ClosetTab.MY_LIKES       -> AppState.sentLikes.size
+                    // ⚠️ 목록(MyLikesTab)은 교환완료된 아이템을 걸러서 보여주는데 배지는 전체 개수
+                    //    (sentLikes.size)를 세고 있어서 숫자가 카드 수와 안 맞던 버그 — 같은 필터 적용.
+                    ClosetTab.MY_LIKES       -> AppState.sentLikes.count { !AppState.isTheirItemCompleted(it.item.id) }
                     else                     -> 0
                 }
                 Button(
@@ -430,6 +435,10 @@ private fun ActiveRoomReceivedCard(
                 AsyncImage(room.partner.avatar, null, modifier = Modifier.size(20.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                 Spacer(Modifier.width(6.dp))
                 Text("${room.partner.name}님과 매칭 중이에요", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                room.partner.mannerScore?.let { score ->
+                    Spacer(Modifier.width(4.dp))
+                    Text("★${String.format("%.1f", score)}", color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
             Spacer(Modifier.height(4.dp))
             Text(
@@ -791,7 +800,16 @@ fun ItemDetailSheet(
                     AsyncImage(item.user.avatar, null, modifier = Modifier.size(28.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                     Spacer(Modifier.width(8.dp))
                     Column {
-                        Text(item.user.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(item.user.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            // ✅ 옷 주인의 평점(매너온도)을 상세보기에서 바로 확인 (서버 값이 있을 때만)
+                            item.user.mannerScore?.let { score ->
+                                Spacer(Modifier.width(6.dp))
+                                Icon(Icons.Default.Star, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(2.dp))
+                                Text(String.format("%.1f", score), color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                         if (item.distance.isNotEmpty()) Text(item.distance, color = TextTertiary, fontSize = 10.sp)
                     }
                 }
@@ -870,6 +888,10 @@ fun CombinedInterestedClosetDialog(
     var itemsByUser by remember(fromUsers) { mutableStateOf<Map<Int, List<ClothingItem>?>>(emptyMap()) }
     var filterUserId by remember(fromUsers) { mutableStateOf<Int?>(null) } // null = 전체 보기
     var retryTick by remember(fromUsers) { mutableStateOf(0) }
+    // ✅ 요청사항: 서로 좋아요가 겹치면 "바로 매칭"되지 말고 한 번 확인받기. 서버는 좋아요 즉시
+    //    매칭을 성사시키기 때문에(프론트에서 매칭 자체를 보류할 방법이 없음), 좋아요를 보내기 전에
+    //    "이 사람은 이미 내 옷에 관심을 보냈으니 좋아요를 누르면 바로 매칭돼요"라고 확인시킨다.
+    var confirmLikeItem by remember { mutableStateOf<ClothingItem?>(null) }
 
     LaunchedEffect(fromUsers, retryTick) {
         itemsByUser = emptyMap()
@@ -896,6 +918,29 @@ fun CombinedInterestedClosetDialog(
     var filteredUserProfile by remember(filterUserId) { mutableStateOf<PublicUserResponse?>(null) }
     LaunchedEffect(filterUserId) {
         filteredUserProfile = filterUserId?.let { AppState.getPublicProfile(it) }
+    }
+
+    // 매칭 확인 다이얼로그 — 좋아요를 실제로 보내기 전에 한 번 확인
+    confirmLikeItem?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { confirmLikeItem = null },
+            title = { Text("바로 매칭될 수 있어요", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+            text = {
+                Text("${pending.user.name}님은 이미 내 옷에 관심을 보냈어요. \"${pending.name}\"에 좋아요를 누르면 바로 매칭이 시작돼요. 진행할까요?")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = pending
+                    confirmLikeItem = null
+                    AppState.likeItem(target) { result ->
+                        if (result is MatchResult.Matched) onMatched(result.match)
+                    }
+                }) { Text("매칭하기", color = AccentYellow, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmLikeItem = null }) { Text("아직이요", color = TextTertiary) }
+            }
+        )
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -1024,8 +1069,11 @@ fun CombinedInterestedClosetDialog(
                         showOwnerBadge = fromUsers.size > 1 && filterUserId == null,
                         onClick        = { onShowDetail(item) },
                         onLike         = {
-                            AppState.likeItem(item) { result ->
-                                if (result is MatchResult.Matched) onMatched(result.match)
+                            if (alreadyLiked) {
+                                // 좋아요 취소는 매칭을 만들지 않으니 확인 없이 바로
+                                AppState.likeItem(item) { }
+                            } else {
+                                confirmLikeItem = item
                             }
                         }
                     )
