@@ -43,6 +43,15 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
         AppState.loadMatchRoomCandidates(roomId) { my, _ -> candidates = my }
     }
 
+    // ⚠️ 버그 수정: 서버가 주는 candidates는 "새로 고를 수 있는 후보"만 담고 있어서, 이미 이 방에
+    // 잠겨있는 아이템(room.myWantList)은 여기 안 들어있을 수 있음(그 아이템은 status=in_exchange로
+    // 취급돼서 후보 풀에서 빠짐 — 스펙 6절 참고). 그래서 이미 선택된 옷을 체크박스로 "빼는" 것 자체가
+    // 안 됐음(화면에 아예 안 보이니까). candidates + 이미 선택된 목록을 합쳐서 전부 토글 가능하게 함.
+    val mergedList = candidates?.let { base ->
+        val alreadySelected = room?.myWantList ?: emptyList()
+        (alreadySelected + base).distinctBy { it.id }
+    }
+
     Column(Modifier.fillMaxSize().background(BgPrimary)) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
@@ -60,7 +69,7 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
         }
 
         Box(Modifier.weight(1f)) {
-            val list = candidates
+            val list = mergedList
             when {
                 list == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = AccentYellow)
