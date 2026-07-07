@@ -66,6 +66,8 @@ fun MatchRoomsScreen(
     LaunchedEffect(Unit) { AppState.refreshMatchRooms() }
 
     val filteredRooms = rooms.filter { it.matchesFilter(selectedFilter) }
+    val duplicateGroups = AppState.duplicateActiveRoomGroups()
+    var mergingRoomId by remember { mutableStateOf<Int?>(null) }
 
     addressPromptRoomId?.let { roomId ->
         AddressPromptDialog(
@@ -167,6 +169,38 @@ fun MatchRoomsScreen(
             }
         }
         Spacer(Modifier.height(8.dp))
+
+        // ⚠️ 같은 상대와 활성 매칭룸이 여러 개 생긴 경우(백엔드 병합 실패로 추정) 안내 + 합치기 버튼
+        duplicateGroups.forEach { group ->
+            val partner = group.first().partner
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
+                    .background(PassColor.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "${partner.name}님과 매칭방이 ${group.size}개 있어요",
+                        color = PassColor, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                    )
+                    Text("내가 고른 옷은 하나로 합칠 수 있어요 (상대가 고른 옷은 상대가 다시 골라야 해요)", color = TextSecondary, fontSize = 10.sp)
+                }
+                Spacer(Modifier.width(8.dp))
+                val primary = group.maxByOrNull { it.id }!!
+                TextButton(
+                    onClick = {
+                        mergingRoomId = primary.id
+                        group.filter { it.id != primary.id }.forEach { dup ->
+                            AppState.mergeDuplicateMatchRoom(primary.id, dup.id) { mergingRoomId = null }
+                        }
+                    },
+                    enabled = mergingRoomId == null
+                ) {
+                    Text(if (mergingRoomId == primary.id) "합치는 중..." else "합치기", color = PassColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+        }
 
         PullToRefreshBox(
             isRefreshing = isRefreshing,

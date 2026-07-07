@@ -447,7 +447,9 @@ private fun ActiveRoomReceivedCard(
             colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            Text("더 담기", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+            // ⚠️ "더 담기"라는 이름이 "여러 명의 옷장을 모아본다"는 뜻으로 헷갈릴 수 있어서
+            // (이건 이 상대 한 명하고만 진행 중인 방에 아이템을 추가하는 동작) 명칭을 구체적으로 바꿈.
+            Text("${room.partner.name}님 옷장 더 보기", fontWeight = FontWeight.Bold, fontSize = 11.sp)
         }
     }
 }

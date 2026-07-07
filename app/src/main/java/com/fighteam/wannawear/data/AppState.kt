@@ -1005,6 +1005,31 @@ object AppState {
     /** 상단 배지/그룹 계산에 쓰는, SHIPPING 이전 매칭룸 전체 목록 */
     fun activeMatchRooms(): List<MatchRoom> = matchRooms.filter { it.status in activeRoomStatuses }
 
+    // ⚠️ 2026-07-07 추가 — 같은 상대와 SELECTING 단계 매칭룸이 2개 이상 생기는 사례 발견.
+    // 라이브 서버 실측(GET /api/match-rooms)으로 원인 확정: "교환 수정 요청"(POST
+    // /api/match-rooms/{id}/request-modification)을 호출할 때마다 기존 방을 SELECTING으로
+    // 되돌리는 게 아니라 매번 새 방을 만들어버림 — 같은 modificationProposedItemIds([13,16])를
+    // 가진 방이 4개(id 13→14→15→16, 각각 몇 초~며칠 간격)나 쌓여 있었고, 오래된 방들은 정리 안
+    // 된 채 그대로 남아있었음. 100% 백엔드 쪽 버그로 backend-전달사항.md에 기록 필요.
+    // 그 전까지 사용자가 직접 정리할 수 있게 "합치기" 기능만 우선 제공.
+    /** 같은 상대에 대해 활성(SHIPPING 이전) 매칭룸이 여러 개인 경우들을 묶어서 반환 */
+    fun duplicateActiveRoomGroups(): List<List<MatchRoom>> =
+        activeMatchRooms().groupBy { it.partner.id }.values.filter { it.size > 1 }
+
+    /** 중복 매칭룸 정리 — duplicateRoomId의 내 선택(myWantList)만 primaryRoomId로 옮기고
+     *  duplicateRoomId는 취소한다. 상대가 고른 항목(theirWantList)은 상대 쪽에서만 바꿀 수 있어서
+     *  여기서는 옮길 수 없음 — 그 방의 상대 선택은 정리 후 상대에게 다시 골라달라고 안내해야 함. */
+    fun mergeDuplicateMatchRoom(primaryRoomId: Int, duplicateRoomId: Int, onResult: (Boolean) -> Unit = {}) {
+        val primary = matchRooms.firstOrNull { it.id == primaryRoomId }
+        val duplicate = matchRooms.firstOrNull { it.id == duplicateRoomId }
+        if (primary == null || duplicate == null) { onResult(false); return }
+        val mergedIds = (primary.myWantList.map { it.id } + duplicate.myWantList.map { it.id }).distinct()
+        updateMatchRoomSelection(primaryRoomId, mergedIds) { success ->
+            if (success) cancelMatchRoom(duplicateRoomId) { onResult(it) }
+            else onResult(false)
+        }
+    }
+
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {
         unregisterDeviceToken()
