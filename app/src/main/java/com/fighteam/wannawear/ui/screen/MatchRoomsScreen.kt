@@ -57,6 +57,9 @@ fun MatchRoomsScreen(
     var addressPromptRoomId by remember { mutableStateOf<Int?>(null) }
     var cancelConfirmRoomId by remember { mutableStateOf<Int?>(null) }
     var modificationRoomId by remember { mutableStateOf<Int?>(null) }
+    // ⚠️ 2026-07-07 추가 — 교환 개수(내가 받을 옷 개수 vs 상대가 받을 옷 개수)가 다른 채로 잠그면
+    // 한쪽이 더 많이/적게 받는 불공정한 교환이 될 수 있어서, 잠그기 직전에 한 번 더 확인시킨다.
+    var lockConfirmRoomId by remember { mutableStateOf<Int?>(null) }
     var selectedFilter by remember { mutableStateOf(RoomFilter.ALL) }
     val scope = rememberCoroutineScope()
 
@@ -100,6 +103,35 @@ fun MatchRoomsScreen(
                 onSubmit = { itemIds ->
                     AppState.requestMatchRoomModification(roomId, itemIds)
                     modificationRoomId = null
+                }
+            )
+        }
+    }
+
+    lockConfirmRoomId?.let { roomId ->
+        val room = rooms.firstOrNull { it.id == roomId }
+        if (room != null) {
+            val myCount = room.myWantList.size
+            val theirCount = room.theirWantList.size
+            AlertDialog(
+                onDismissRequest = { lockConfirmRoomId = null },
+                title = { Text("교환 개수가 서로 달라요", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        if (myCount > theirCount)
+                            "당신이 상대보다 많은(${myCount}개) 옷을 선택했어요. ${room.partner.name}님은 ${theirCount}개를 선택했어요. 이대로 선택을 잠글까요?"
+                        else
+                            "${room.partner.name}님이 당신보다 많은(${theirCount}개) 옷을 선택했어요. 당신은 ${myCount}개를 선택했어요. 이대로 선택을 잠글까요?"
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        AppState.lockMatchRoomSelection(roomId)
+                        lockConfirmRoomId = null
+                    }) { Text("그대로 진행", color = AccentYellow, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { lockConfirmRoomId = null }) { Text("다시 선택하기", color = TextTertiary) }
                 }
             )
         }
@@ -168,7 +200,14 @@ fun MatchRoomsScreen(
                             room = room,
                             onOpenChat        = { onOpenChat(room.id) },
                             onSelectItems     = { onSelectItems(room.id) },
-                            onLockSelection   = { AppState.lockMatchRoomSelection(room.id) },
+                            onLockSelection   = {
+                                // 이미 상대가 뭔가 골라둔 상태에서 개수가 다르면 잠그기 전에 한 번 더 확인
+                                if (room.theirWantList.isNotEmpty() && room.myWantList.size != room.theirWantList.size) {
+                                    lockConfirmRoomId = room.id
+                                } else {
+                                    AppState.lockMatchRoomSelection(room.id)
+                                }
+                            },
                             onConfirm         = {
                                 AppState.confirmMatchRoom(room.id) { result ->
                                     if (result is ConfirmResult.NeedsAddress) addressPromptRoomId = room.id
@@ -245,6 +284,28 @@ private fun MatchRoomCard(
         WantListRow(title = "내가 받을 옷", items = room.myWantList)
         Spacer(Modifier.height(8.dp))
         WantListRow(title = "상대가 받을 옷", items = room.theirWantList)
+
+        // 개수가 다르면 잠그기 전부터 눈에 띄게 알려준다 (요청사항: 더 많이/적게 받는 쪽에 안내)
+        if (room.status == MatchRoomStatus.SELECTING && room.theirWantList.isNotEmpty() &&
+            room.myWantList.size != room.theirWantList.size
+        ) {
+            Spacer(Modifier.height(8.dp))
+            Row(
+                Modifier.fillMaxWidth().background(StatusPending.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.PriorityHigh, contentDescription = null, tint = StatusPending, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    if (room.myWantList.size > room.theirWantList.size)
+                        "내가 상대보다 옷을 더 많이(${room.myWantList.size}개) 골랐어요"
+                    else
+                        "상대가 나보다 옷을 더 많이(${room.theirWantList.size}개) 골랐어요",
+                    color = StatusPending, fontSize = 10.sp, fontWeight = FontWeight.Bold
+                )
+            }
+        }
 
         Spacer(Modifier.height(14.dp))
 
@@ -588,6 +649,12 @@ private fun ModificationRequestDialog(
         AppState.loadMatchRoomCandidates(room.id) { my, _ -> myCandidates = my }
     }
 
+    // ⚠️ 버그 수정: 서버 candidates는 "새로 고를 수 있는 후보"만 주고, 이미 이 방에 잠긴/선택된
+    // 아이템(room.myWantList)은 candidates에서 빠져있을 수 있음(MatchRoomSelectionScreen과 동일한
+    // 문제). 그래서 이미 선택된 옷은 목록에 아예 안 보여서 체크(포함)도 해제도 못 했음 — 이미 선택된
+    // 것 + 새 후보를 합쳐서 전부 체크 가능하게 한다.
+    val mergedCandidates = myCandidates?.let { base -> (room.myWantList + base).distinctBy { it.id } }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("교환 수정 요청", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
@@ -598,7 +665,7 @@ private fun ModificationRequestDialog(
                     color = TextSecondary, fontSize = 12.sp
                 )
                 Spacer(Modifier.height(10.dp))
-                val candidates = myCandidates
+                val candidates = mergedCandidates
                 if (candidates == null) {
                     Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(color = AccentYellow, modifier = Modifier.size(20.dp))

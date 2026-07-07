@@ -53,7 +53,10 @@ private enum class ClosetTab(val label: String, val emoji: String) {
 // ─────────────────────────────────────────────────────────────────────
 
 @Composable
-fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
+fun ClosetScreen(
+    onNavigateToAdd: () -> Unit = {},
+    onNavigateToMatchRoomSelect: (Int) -> Unit = {}
+) {
     var selectedTab by remember { mutableStateOf(ClosetTab.MY_CLOSET) }
     var viewingGroup by remember { mutableStateOf<Pair<ClothingItem, List<User>>?>(null) }
     var detailItem by remember { mutableStateOf<ClothingItem?>(null) }
@@ -69,7 +72,13 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
         runCatching { AppState.loadExchanges() }
         when (selectedTab) {
             ClosetTab.MY_CLOSET      -> runCatching { AppState.loadMyCloset() }
-            ClosetTab.RECEIVED_LIKES -> runCatching { AppState.loadReceivedLikes() }
+            // ⚠️ 매칭룸(N:M) 도입 이후엔 이미 매칭된 항목이 /likes/received 응답에서 빠지는 것으로
+            //    보여서, 매칭룸 목록도 같이 최신화해야 "받은 관심"이 매칭룸의 theirWantList로
+            //    보정될 수 있다.
+            ClosetTab.RECEIVED_LIKES -> {
+                runCatching { AppState.loadReceivedLikes() }
+                runCatching { AppState.loadMatchRooms() }
+            }
             ClosetTab.MY_LIKES       -> runCatching { AppState.loadSentLikes() }
         }
     }
@@ -177,8 +186,14 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
             ClosetTab.values().forEach { tab ->
                 val selected = selectedTab == tab
                 val badgeCount = when (tab) {
-                    ClosetTab.RECEIVED_LIKES -> AppState.receivedLikes
-                        .count { !AppState.isItemCompleted(it.myItem.id) && !AppState.hasActiveOrCompletedExchangeWith(it.myItem.id, it.fromUser.id) }
+                    // 아직 매칭룸 없는 순수 대기중 좋아요 수 + 진행 중인 매칭룸(상대) 수를 더한다.
+                    // (매칭룸 쪽은 방 하나 = 카드 하나로 통합해서 보여주므로 아이템 개수가 아니라 방 개수)
+                    ClosetTab.RECEIVED_LIKES ->
+                        AppState.receivedLikes.count {
+                            !AppState.isItemCompleted(it.myItem.id) &&
+                                !AppState.hasActiveOrCompletedExchangeWith(it.myItem.id, it.fromUser.id) &&
+                                AppState.activeMatchRoomWith(it.fromUser.id) == null
+                        } + AppState.activeMatchRooms().size
                     ClosetTab.MY_LIKES       -> AppState.sentLikes.size
                     else                     -> 0
                 }
@@ -216,8 +231,9 @@ fun ClosetScreen(onNavigateToAdd: () -> Unit = {}) {
         when (selectedTab) {
             ClosetTab.MY_CLOSET      -> MyClosetTab(onNavigateToAdd, onShowDetail = { detailItem = it })
             ClosetTab.RECEIVED_LIKES -> ReceivedLikesTab(
-                onOpenGroup  = { myItem, fromUsers -> viewingGroup = myItem to fromUsers },
-                onShowDetail = { detailItem = it }
+                onOpenGroup         = { myItem, fromUsers -> viewingGroup = myItem to fromUsers },
+                onShowDetail        = { detailItem = it },
+                onOpenRoomSelection = onNavigateToMatchRoomSelect
             )
             ClosetTab.MY_LIKES       -> MyLikesTab(
                 onShowDetail = { detailItem = it },
@@ -298,24 +314,30 @@ private fun MyClosetTab(onNavigateToAdd: () -> Unit, onShowDetail: (ClothingItem
 @Composable
 private fun ReceivedLikesTab(
     onOpenGroup: (myItem: ClothingItem, fromUsers: List<User>) -> Unit,
-    onShowDetail: (ClothingItem) -> Unit
+    onShowDetail: (ClothingItem) -> Unit,
+    onOpenRoomSelection: (Int) -> Unit
 ) {
-    // ⚠️ 서버가 매칭 성사 후에도 이 항목을 안 지워줘서(실측 확인), 이미 좋아요를 눌러줘서
-    //    매칭까지 성사된 사람이 계속 "받은 관심"에 남아있는 문제가 있었음. 완료된 내 아이템뿐 아니라,
-    //    이미 그 사람과 매칭(취소 제외)이 성사된 건도 걸러낸다 — 그건 이제 "교환 내역"에서 다뤄야 함.
-    val likes = AppState.receivedLikes.filter { like ->
+    // ⚠️ N:M 매칭룸 도입 이후: 어떤 상대와 이미 매칭룸이 생기면(좋아요가 roomId로 병합되는 경로)
+    //    그 아이템은 GET /likes/received 응답에서 더 이상 안 내려오는 것으로 보임(실측 — 매칭된
+    //    카드가 "받은 관심"에서 통째로 사라짐). 그래서 상대별로 나눈다:
+    //    ① 아직 매칭룸이 없는, 진짜 대기 중인 좋아요 → 옷(myItem) 1개 = 카드 1개로 기존처럼 표시
+    //    ② 이미 매칭룸이 있는 상대 → "같은 상대에 여러 카드" 대신 방 하나 = 카드 하나로 통합하고,
+    //       그 카드에서 바로 "더 담기"(MatchRoomSelectionScreen)로 이동해 교환 아이템을 늘리게 한다.
+    val pendingLikes = AppState.receivedLikes.filter { like ->
         !AppState.isItemCompleted(like.myItem.id) &&
-            !AppState.hasActiveOrCompletedExchangeWith(like.myItem.id, like.fromUser.id)
+            !AppState.hasActiveOrCompletedExchangeWith(like.myItem.id, like.fromUser.id) &&
+            AppState.activeMatchRoomWith(like.fromUser.id) == null
     }
+    val activeRooms = AppState.activeMatchRooms()
     var isRefreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // ✅ 같은 내 옷(myItem)에 여러 명이 관심 보내면 하나의 그룹으로 묶는다.
     //    카드 수가 사람 수만큼 늘어나서 헷갈리던 문제 → "옷 1개 = 카드 1개"로 정리.
-    val groups = remember(likes) {
+    val pendingGroups = remember(pendingLikes) {
         val order = LinkedHashMap<Int, ClothingItem>()
         val usersByItem = LinkedHashMap<Int, MutableList<User>>()
-        likes.forEach { like ->
+        pendingLikes.forEach { like ->
             order.putIfAbsent(like.myItem.id, like.myItem)
             val bucket = usersByItem.getOrPut(like.myItem.id) { mutableListOf() }
             if (bucket.none { it.id == like.fromUser.id }) bucket.add(like.fromUser)
@@ -329,12 +351,13 @@ private fun ReceivedLikesTab(
             scope.launch {
                 isRefreshing = true
                 runCatching { AppState.loadReceivedLikes() }
+                runCatching { AppState.loadMatchRooms() }
                 isRefreshing = false
             }
         },
         modifier = Modifier.fillMaxSize()
     ) {
-        if (groups.isEmpty()) {
+        if (activeRooms.isEmpty() && pendingGroups.isEmpty()) {
             EmptyState("💛", "아직 받은 관심이 없어요", "옷을 더 등록해보세요!")
         } else {
             LazyColumn(
@@ -342,7 +365,14 @@ private fun ReceivedLikesTab(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(groups, key = { it.first.id }) { (myItem, fromUsers) ->
+                items(activeRooms, key = { "room-${it.id}" }) { room ->
+                    ActiveRoomReceivedCard(
+                        room = room,
+                        onOpenRoomSelection = { onOpenRoomSelection(room.id) },
+                        onShowDetail = onShowDetail
+                    )
+                }
+                items(pendingGroups, key = { "item-${it.first.id}" }) { (myItem, fromUsers) ->
                     val inExchange by remember { derivedStateOf { AppState.isItemInExchange(myItem.id) } }
                     GroupedReceivedLikeCard(
                         myItem       = myItem,
@@ -353,6 +383,71 @@ private fun ReceivedLikesTab(
                     )
                 }
             }
+        }
+    }
+}
+
+// 이미 매칭룸이 있는 상대 — 방 하나를 카드 하나로 보여줌 (아이템 개수만큼 카드가 늘어나지 않게)
+@Composable
+private fun ActiveRoomReceivedCard(
+    room: com.fighteam.wannawear.data.model.MatchRoom,
+    onOpenRoomSelection: () -> Unit,
+    onShowDetail: (ClothingItem) -> Unit
+) {
+    val myItemsTheyWant = room.theirWantList // 상대가 원하는, 내 소유 아이템들
+
+    Row(
+        Modifier.fillMaxWidth()
+            .background(BgCard, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(70.dp).clip(RoundedCornerShape(10.dp))) {
+            if (myItemsTheyWant.isNotEmpty()) {
+                AsyncImage(
+                    myItemsTheyWant.first().image, null,
+                    modifier = Modifier.fillMaxSize().clickable { onShowDetail(myItemsTheyWant.first()) },
+                    contentScale = ContentScale.Crop
+                )
+                if (myItemsTheyWant.size > 1) {
+                    Text(
+                        "+${myItemsTheyWant.size - 1}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp)
+                            .background(Color(0xAA000000), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+            } else {
+                Box(Modifier.fillMaxSize().background(BgCardDark), contentAlignment = Alignment.Center) {
+                    AsyncImage(room.partner.avatar, null, modifier = Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                }
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AsyncImage(room.partner.avatar, null, modifier = Modifier.size(20.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                Spacer(Modifier.width(6.dp))
+                Text("${room.partner.name}님과 매칭 중이에요", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (myItemsTheyWant.isEmpty()) "아직 상대가 고른 내 옷이 없어요"
+                else "내 옷 ${myItemsTheyWant.size}개를 원해요",
+                color = TextSecondary, fontSize = 11.sp
+            )
+            Spacer(Modifier.height(2.dp))
+            Text("내가 받고 싶은 옷도 계속 골라 담을 수 있어요", color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Button(
+            onClick = onOpenRoomSelection,
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            Text("더 담기", fontWeight = FontWeight.Bold, fontSize = 11.sp)
         }
     }
 }

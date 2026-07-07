@@ -309,13 +309,13 @@ object AppState {
                         return@launch
                     }
                     // ⚠️ v1.0 MatchRoom 스펙: matched=false여도 roomId가 있으면 "이미 진행 중인
-                    // 매칭방의 선택 목록에 조용히 추가됨"이라는 뜻(문서 10절). 별도 팝업 없이,
-                    // 그 방을 이미 알고 있다면 백그라운드로 최신화해둔다.
+                    // 매칭방의 선택 목록에 조용히 추가됨"이라는 뜻(문서 10절). 예전엔 로컬에 그 방을
+                    // "이미 알고 있을 때만" 새로고침해서, 아직 matchRooms를 안 불러온 상태(예: 매칭
+                    // 탭에 한 번도 안 들어간 경우)에서 좋아요를 누르면 방 목록에 새 방이 아예 안 뜨는
+                    // 문제가 있었음 — 항상 조회해서 없으면 새로 추가, 있으면 갱신하도록 통일.
                     if (res.roomId != null) {
                         val roomId = res.roomId.toClientId()
-                        if (matchRooms.any { it.id == roomId }) {
-                            scope.launch { runCatching { refreshMatchRoomDetail(roomId) } }
-                        }
+                        scope.launch { runCatching { refreshMatchRoomDetail(roomId) } }
                     }
                     onResult(MatchResult.Liked)
                 } else {
@@ -989,6 +989,21 @@ object AppState {
             it.myItem.id == myItemId && it.partner.id == partnerUserId &&
                 (it.status == ExchangeStatus.MATCHED || it.status == ExchangeStatus.CONFIRMED)
         }
+
+    // ⚠️ 2026-07-07 추가 — N:M MatchRoom 도입 이후 발견한 문제: 상대와 이미 매칭룸이 생기면
+    // (roomId 병합 경로) 그 아이템에 대한 서버의 GET /likes/received 응답이 더 이상 내려오지
+    // 않는 것으로 보임(실측 — 매칭된 카드가 "받은 관심"에서 통째로 사라짐). 그래서 "받은 관심"은
+    // 이제 원본 좋아요 목록뿐 아니라, SHIPPING 이전 매칭룸의 theirWantList(상대가 원하는 내 옷)도
+    // 같이 봐야 매칭된 옷이 안 사라진다. 방이 SHIPPING 이상이면 hasActiveOrCompletedExchangeWith와
+    // 동일한 기준으로 자연히 빠진다(아래 activeMatchRoomWith가 그 방들을 아예 안 돌려줌).
+    private val activeRoomStatuses = setOf(MatchRoomStatus.SELECTING, MatchRoomStatus.MATCHED, MatchRoomStatus.CONFIRMED)
+
+    /** SHIPPING 이전(아직 "받은 관심" 취급 대상) 상태의, 특정 상대와의 매칭룸. 없으면 null. */
+    fun activeMatchRoomWith(partnerUserId: Int): MatchRoom? =
+        matchRooms.firstOrNull { it.partner.id == partnerUserId && it.status in activeRoomStatuses }
+
+    /** 상단 배지/그룹 계산에 쓰는, SHIPPING 이전 매칭룸 전체 목록 */
+    fun activeMatchRooms(): List<MatchRoom> = matchRooms.filter { it.status in activeRoomStatuses }
 
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {
