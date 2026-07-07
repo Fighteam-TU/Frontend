@@ -365,6 +365,8 @@ private fun GroupedReceivedLikeCard(
     onOpenGroup: () -> Unit,
     onShowDetail: () -> Unit
 ) {
+    val matchingUsers = fromUsers.filter { AppState.hasPendingExchangeWith(myItem.id, it.id) }
+
     Row(
         Modifier.fillMaxWidth()
             .background(BgCard, RoundedCornerShape(16.dp))
@@ -393,7 +395,11 @@ private fun GroupedReceivedLikeCard(
                         Box(
                             Modifier.size(22.dp).clip(CircleShape)
                                 .background(BgCard)
-                                .border(1.5.dp, BgCard, CircleShape)
+                                .border(
+                                    1.5.dp,
+                                    if (u.id in matchingUsers.map { it.id }) AccentYellow else BgCard,
+                                    CircleShape
+                                )
                         ) {
                             AsyncImage(u.avatar, null, modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
                         }
@@ -414,6 +420,16 @@ private fun GroupedReceivedLikeCard(
             Spacer(Modifier.height(4.dp))
             Text(myItem.name, color = TextSecondary, fontSize = 11.sp, maxLines = 1)
             Text("${myItem.size}  ${myItem.heightFit}", color = TextTertiary, fontSize = 10.sp)
+            // ⚠️ 매칭됐다고 바로 숨기지 않고(옷장 모아보기 메리트 유지), 매칭중임을 여기서 알려줌.
+            //    양쪽 다 배송 시작하면 hasActiveOrCompletedExchangeWith가 걸러내서 자동으로 사라짐.
+            if (matchingUsers.isNotEmpty()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    if (matchingUsers.size == 1) "${matchingUsers.first().name}님과 매칭 중이에요"
+                    else "${matchingUsers.size}명과 매칭 중이에요",
+                    color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold
+                )
+            }
         }
 
         Button(
@@ -771,8 +787,9 @@ fun CombinedInterestedClosetDialog(
     val failedUsers = fromUsers.filter { itemsByUser.containsKey(it.id) && itemsByUser[it.id] == null }
     val combinedItems = remember(itemsByUser, filterUserId) {
         itemsByUser.values.filterNotNull().flatten()
-            // ⚠️ 이미 나와 교환 완료된 아이템은 다시 좋아요 보낼 수 있는 것처럼 보이면 안 됨
-            .filterNot { AppState.isTheirItemCompleted(it.id) }
+            // ⚠️ 매칭됐다고 바로 빼지 않고, 양쪽 다 배송 시작(SHIPPING) 이상일 때만 뺀다 —
+            // 그 전까진 옷장 모아보기에서 계속 보이고 하트 토글도 가능해야 함(요청사항).
+            .filterNot { AppState.isTheirItemShippedOrCompleted(it.id) }
             .filter { filterUserId == null || it.user.id == filterUserId }
     }
 

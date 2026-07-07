@@ -964,11 +964,31 @@ object AppState {
     fun isTheirItemCompleted(itemId: Int): Boolean =
         matches.any { it.status == ExchangeStatus.COMPLETE && it.theirItem.id == itemId }
 
-    // ⚠️ 서버가 매칭 성사 후에도 GET /api/likes/received에서 그 항목을 안 지워줌(실측 확인) —
-    //    그래서 이미 좋아요를 눌러서 매칭이 성사된 상대가 "받은 관심"에 계속 남아있는 문제가 있었음.
-    //    CANCELLED는 제외 — 취소됐으면 다시 판단할 수 있게 "받은 관심"에 나와야 함.
+    /** 옷장 모아보기에서 아이템을 숨길지 판단 — SHIPPING 이상(양쪽 다 배송 시작)이면 숨김.
+     *  MATCHED/CONFIRMED까지는 계속 보여줘서(하트 토글 등) 다른 옷도 둘러볼 수 있게 한다. */
+    fun isTheirItemShippedOrCompleted(itemId: Int): Boolean =
+        matches.any {
+            it.theirItem.id == itemId && (it.status == ExchangeStatus.SHIPPING || it.status == ExchangeStatus.COMPLETE)
+        }
+
+    // ⚠️ 서버가 매칭 성사 후에도 GET /api/likes/received에서 그 항목을 안 지워줌(실측 확인).
+    //    처음엔 "매칭되면 바로 숨김" 처리했었는데, 그러면 매칭된 사람의 옷장을 더 못 보게 돼서
+    //    (하트 토글로 다른 옷도 둘러보는 메리트가 사라짐) — "양쪽 다 배송 시작(SHIPPING) 이상"
+    //    일 때만 숨기도록 완화함. 그 전까지는 "받은 관심"에 남아있되 매칭중 표시만 해준다.
+    //    CANCELLED는 당연히 제외 — 취소됐으면 다시 판단할 수 있게 계속 나와야 함.
     fun hasActiveOrCompletedExchangeWith(myItemId: Int, partnerUserId: Int): Boolean =
-        matches.any { it.myItem.id == myItemId && it.partner.id == partnerUserId && it.status != ExchangeStatus.CANCELLED }
+        matches.any {
+            it.myItem.id == myItemId && it.partner.id == partnerUserId &&
+                (it.status == ExchangeStatus.SHIPPING || it.status == ExchangeStatus.COMPLETE)
+        }
+
+    /** "받은 관심" 카드에 "매칭중" 배지를 보여줄지 판단용 — SHIPPING 이전(MATCHED/CONFIRMED)이면 true.
+     *  SHIPPING 이상은 hasActiveOrCompletedExchangeWith가 이미 걸러내므로 여기 안 옴. */
+    fun hasPendingExchangeWith(myItemId: Int, partnerUserId: Int): Boolean =
+        matches.any {
+            it.myItem.id == myItemId && it.partner.id == partnerUserId &&
+                (it.status == ExchangeStatus.MATCHED || it.status == ExchangeStatus.CONFIRMED)
+        }
 
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {
