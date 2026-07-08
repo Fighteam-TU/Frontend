@@ -128,13 +128,15 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
         }
 
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            // ⚠️ 버그 수정: 버튼 라벨이 selectedIds.size(체크된 id 전부)를 그대로 썼는데, 상대가
+            // 제안한 아이템(proposedByThem) 중 이 화면 후보 목록에 없는 id가 섞여 selectedIds에
+            // 들어있으면 화면엔 2개만 체크돼 보이는데 "4개"처럼 실제 화면과 다른 숫자가 뜨는 문제가
+            // 있었음. 실제로 저장될(=화면에 보이는) 개수만 세도록 mergedList 기준으로 계산한다.
+            val availableIds = (mergedList ?: emptyList()).map { it.id }.toSet()
+            val visibleSelectedCount = selectedIds.count { it in availableIds }
             Button(
                 onClick = {
                     isSaving = true
-                    // ⚠️ 제안받은 아이템 중 후보 목록에 없는 것(내가 좋아요한 적 없는 옷 등)이 섞여
-                    // 있으면 서버가 ITEM_NOT_IN_CANDIDATES로 거절하므로, 화면에 실제로 보이는(=선택
-                    // 가능한) 아이템만 걸러서 저장한다.
-                    val availableIds = (mergedList ?: emptyList()).map { it.id }.toSet()
                     AppState.updateMatchRoomSelection(roomId, selectedIds.filter { it in availableIds }) { success ->
                         isSaving = false
                         if (success) onBack()
@@ -146,7 +148,7 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
                 colors   = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText)
             ) {
                 Text(
-                    if (isSaving) "저장 중..." else "선택 저장하기 (${selectedIds.size}개)",
+                    if (isSaving) "저장 중..." else "선택 저장하기 (${visibleSelectedCount}개)",
                     fontWeight = FontWeight.Black, fontSize = 15.sp
                 )
             }

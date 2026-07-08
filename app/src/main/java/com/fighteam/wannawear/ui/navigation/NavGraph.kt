@@ -175,8 +175,7 @@ fun WannaWearNavGraph() {
             }
             composable(Screen.Closet.route) {
                 ClosetScreen(
-                    onNavigateToAdd = { navController.navigate(Screen.AddItem.route) },
-                    onNavigateToMatchRoomSelect = { roomId -> navController.navigate("match_room_select/$roomId") }
+                    onNavigateToAdd = { navController.navigate(Screen.AddItem.route) }
                 )
             }
             composable(Screen.Profile.route)  {

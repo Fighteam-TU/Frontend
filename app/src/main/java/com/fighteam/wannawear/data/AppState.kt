@@ -987,13 +987,33 @@ object AppState {
                 (it.status == ExchangeStatus.SHIPPING || it.status == ExchangeStatus.COMPLETE)
         }
 
-    /** "받은 관심" 카드에 "매칭중" 배지를 보여줄지 판단용 — SHIPPING 이전(MATCHED/CONFIRMED)이면 true.
-     *  SHIPPING 이상은 hasActiveOrCompletedExchangeWith가 이미 걸러내므로 여기 안 옴. */
+    /** "받은 관심" 카드에 "매칭중" 배지를 보여줄지 판단용 — SHIPPING 이전이면 true.
+     *  기존 Exchange뿐 아니라 활성 매칭룸(theirWantList에 이 아이템 포함)도 매칭중으로 본다. */
     fun hasPendingExchangeWith(myItemId: Int, partnerUserId: Int): Boolean =
         matches.any {
             it.myItem.id == myItemId && it.partner.id == partnerUserId &&
                 (it.status == ExchangeStatus.MATCHED || it.status == ExchangeStatus.CONFIRMED)
+        } || activeMatchRooms().any { room ->
+            room.partner.id == partnerUserId && room.theirWantList.any { it.id == myItemId }
         }
+
+    /** "받은 관심" 탭/배지가 실제로 보여줄 목록.
+     *  ✅ 2026-07-08: 매칭룸이 생긴 상대를 별도 카드로 빼지 않고 일반 좋아요와 똑같이 취급한다.
+     *  서버가 방 생성/병합 과정에서 좋아요 레코드를 지워버리는 케이스(백엔드 버그, 라이브 확인)가
+     *  있어서, 활성 방의 theirWantList(상대가 원하는 내 옷)를 좋아요처럼 합쳐 보정한다 —
+     *  이미 같은 (상대, 아이템) 좋아요가 살아있으면 중복 추가하지 않음. */
+    fun receivedLikesForDisplay(): List<ReceivedLike> {
+        val base = receivedLikes.filter { like ->
+            !isItemCompleted(like.myItem.id) &&
+                !hasActiveOrCompletedExchangeWith(like.myItem.id, like.fromUser.id)
+        }
+        val supplements = activeMatchRooms().flatMap { room ->
+            room.theirWantList
+                .filter { item -> base.none { it.fromUser.id == room.partner.id && it.myItem.id == item.id } }
+                .map { ReceivedLike(fromUser = room.partner, myItem = it) }
+        }
+        return base + supplements
+    }
 
     // ⚠️ 2026-07-07 추가 — N:M MatchRoom 도입 이후 발견한 문제: 상대와 이미 매칭룸이 생기면
     // (roomId 병합 경로) 그 아이템에 대한 서버의 GET /likes/received 응답이 더 이상 내려오지
@@ -1010,30 +1030,20 @@ object AppState {
     /** 상단 배지/그룹 계산에 쓰는, SHIPPING 이전 매칭룸 전체 목록 */
     fun activeMatchRooms(): List<MatchRoom> = matchRooms.filter { it.status in activeRoomStatuses }
 
-    // ⚠️ 2026-07-07 추가 — 같은 상대와 SELECTING 단계 매칭룸이 2개 이상 생기는 사례 발견.
+    // ⚠️ 2026-07-07 발견 — 같은 상대와 SELECTING 단계 매칭룸이 2개 이상 생기는 사례 발견.
     // 라이브 서버 실측(GET /api/match-rooms)으로 원인 확정: "교환 수정 요청"(POST
     // /api/match-rooms/{id}/request-modification)을 호출할 때마다 기존 방을 SELECTING으로
-    // 되돌리는 게 아니라 매번 새 방을 만들어버림 — 같은 modificationProposedItemIds([13,16])를
-    // 가진 방이 4개(id 13→14→15→16, 각각 몇 초~며칠 간격)나 쌓여 있었고, 오래된 방들은 정리 안
-    // 된 채 그대로 남아있었음. 100% 백엔드 쪽 버그로 backend-전달사항.md에 기록 필요.
-    // 그 전까지 사용자가 직접 정리할 수 있게 "합치기" 기능만 우선 제공.
-    /** 같은 상대에 대해 활성(SHIPPING 이전) 매칭룸이 여러 개인 경우들을 묶어서 반환 */
+    // 되돌리는 게 아니라 매번 새 방을 만들어버림. 100% 백엔드 쪽 버그로 backend-전달사항.md에
+    // 기록해서 전달함 — 근본 수정은 백엔드 담당.
+    // ⚠️ 2026-07-08: 프론트에서 "합치기"(내 선택 이관 + 중복 방 취소) 기능을 임시로 넣었었는데,
+    // cancelMatchRoom이 상대의 좋아요 레코드까지 지워버리는 별개의 백엔드 버그와 겹쳐서 실제
+    // 사용자 데이터(상대가 보낸 관심)가 유실되는 사고로 이어졌다. 그래서 자동 정리 기능은 완전히
+    // 제거함 — 중복 방은 그냥 각자 따로 두고, 취소는 사용자가 상황을 이해한 뒤 신중하게 직접
+    // "취소하기" 버튼으로만 하도록 한다(취소 확인 다이얼로그에 좋아요 유실 경고 문구 추가함).
+    /** 같은 상대에 대해 활성(SHIPPING 이전) 매칭룸이 여러 개인 경우들을 묶어서 반환 — 참고/진단용,
+     *  자동 정리 액션은 없음. */
     fun duplicateActiveRoomGroups(): List<List<MatchRoom>> =
         activeMatchRooms().groupBy { it.partner.id }.values.filter { it.size > 1 }
-
-    /** 중복 매칭룸 정리 — duplicateRoomId의 내 선택(myWantList)만 primaryRoomId로 옮기고
-     *  duplicateRoomId는 취소한다. 상대가 고른 항목(theirWantList)은 상대 쪽에서만 바꿀 수 있어서
-     *  여기서는 옮길 수 없음 — 그 방의 상대 선택은 정리 후 상대에게 다시 골라달라고 안내해야 함. */
-    fun mergeDuplicateMatchRoom(primaryRoomId: Int, duplicateRoomId: Int, onResult: (Boolean) -> Unit = {}) {
-        val primary = matchRooms.firstOrNull { it.id == primaryRoomId }
-        val duplicate = matchRooms.firstOrNull { it.id == duplicateRoomId }
-        if (primary == null || duplicate == null) { onResult(false); return }
-        val mergedIds = (primary.myWantList.map { it.id } + duplicate.myWantList.map { it.id }).distinct()
-        updateMatchRoomSelection(primaryRoomId, mergedIds) { success ->
-            if (success) cancelMatchRoom(duplicateRoomId) { onResult(it) }
-            else onResult(false)
-        }
-    }
 
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {

@@ -67,14 +67,7 @@ fun MatchRoomsScreen(
 
     LaunchedEffect(Unit) { AppState.refreshMatchRooms() }
 
-    val duplicateGroups = AppState.duplicateActiveRoomGroups()
-    var mergingRoomId by remember { mutableStateOf<Int?>(null) }
-    // ✅ 요청사항: 같은 상대에 대해 카드를 여러 개 만들지 않는다 — 중복 방(백엔드 버그로 생성됨)이
-    //    있어도 목록에는 가장 최근 방 하나만 보여주고, 나머지는 상단 배너의 "합치기"로 정리하게 한다.
-    val hiddenDuplicateIds = duplicateGroups
-        .flatMap { group -> group.sortedByDescending { it.id }.drop(1) }
-        .map { it.id }.toSet()
-    val filteredRooms = rooms.filter { it.matchesFilter(selectedFilter) && it.id !in hiddenDuplicateIds }
+    val filteredRooms = rooms.filter { it.matchesFilter(selectedFilter) }
 
     addressPromptRoomId?.let { roomId ->
         AddressPromptDialog(
@@ -92,7 +85,11 @@ fun MatchRoomsScreen(
         AlertDialog(
             onDismissRequest = { cancelConfirmRoomId = null },
             title = { Text("교환을 취소할까요?", fontWeight = FontWeight.Bold) },
-            text  = { Text("이 방의 교환이 즉시 취소돼요. 되돌릴 수 없어요.") },
+            text  = {
+                // ⚠️ 라이브 검증(2026-07-08): 방을 취소하면 상대가 이 옷들에 눌렀던 좋아요 자체가
+                // 서버에서 삭제되는 것으로 보임(백엔드 버그, 문서 기록함) — 취소 전에 미리 알려준다.
+                Text("이 방의 교환이 즉시 취소돼요. 되돌릴 수 없고, 상대가 눌렀던 좋아요도 함께 사라질 수 있어요.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     AppState.cancelMatchRoom(roomId)
@@ -177,38 +174,6 @@ fun MatchRoomsScreen(
         }
         Spacer(Modifier.height(8.dp))
 
-        // ⚠️ 같은 상대와 활성 매칭룸이 여러 개 생긴 경우(백엔드 병합 실패로 추정) 안내 + 합치기 버튼
-        duplicateGroups.forEach { group ->
-            val partner = group.first().partner
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)
-                    .background(PassColor.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "${partner.name}님과 매칭방이 ${group.size}개 있어요",
-                        color = PassColor, fontSize = 12.sp, fontWeight = FontWeight.Bold
-                    )
-                    Text("목록엔 최신 방 하나만 보여드리고 있어요 · 합치면 내 선택이 한 방으로 모여요", color = TextSecondary, fontSize = 10.sp)
-                }
-                Spacer(Modifier.width(8.dp))
-                val primary = group.maxByOrNull { it.id }!!
-                TextButton(
-                    onClick = {
-                        mergingRoomId = primary.id
-                        group.filter { it.id != primary.id }.forEach { dup ->
-                            AppState.mergeDuplicateMatchRoom(primary.id, dup.id) { mergingRoomId = null }
-                        }
-                    },
-                    enabled = mergingRoomId == null
-                ) {
-                    Text(if (mergingRoomId == primary.id) "합치는 중..." else "합치기", color = PassColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                }
-            }
-        }
-
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = {
@@ -285,12 +250,12 @@ private fun MatchRoomCard(
         MatchRoomStatus.COMPLETE  -> Pair(StatusComplete, StatusComplete.copy(alpha = 0.12f))
         MatchRoomStatus.CANCELLED -> Pair(TextTertiary, TextTertiary.copy(alpha = 0.12f))
     }
-    // ⚠️ 라이브 검증(2026-07-08): SELECTING 상태에서 request-modification을 호출하면 서버가
-    // MODIFICATION_NOT_ALLOWED로 거절함(메시지는 "배송 시작 이후..."라고 잘못 나오지만).
-    // 생각해보면 SELECTING에선 "아이템 선택하기"로 그냥 다시 고르면 되니 수정요청이 필요 없음 —
-    // 잠긴 이후(MATCHED/CONFIRMED)에만 버튼을 노출한다. 이게 사용자가 봤던
-    // "발송 안 했는데 이미 발송된 교환이라고 뜨는" 에러의 실제 원인이었음.
-    val canRequestModification = room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED
+    // ⚠️ 라이브 검증(2026-07-08): 첫 SELECTING(아직 한 번도 안 잠근 방)에서 request-modification을
+    // 호출하면 서버가 MODIFICATION_NOT_ALLOWED로 거절함. 하지만 상대가 수정요청을 보내서 방이
+    // MATCHED/CONFIRMED에서 SELECTING으로 되돌아온 경우(modificationRequestedByThem=true)엔,
+    // 나도 다른 구성으로 맞받아 제안할 수 있어야 하니 이 경우엔 버튼을 계속 보여준다.
+    val canRequestModification = room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED ||
+        (room.status == MatchRoomStatus.SELECTING && room.modificationRequestedByThem)
     val canCancel = room.status != MatchRoomStatus.COMPLETE && room.status != MatchRoomStatus.CANCELLED
 
     Column(
