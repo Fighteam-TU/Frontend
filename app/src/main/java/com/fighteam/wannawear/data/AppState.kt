@@ -572,6 +572,15 @@ object AppState {
             try {
                 apiCall { api.completeMatchRoom(roomId.toLong()) }
                 refreshMatchRoomDetail(roomId)
+                // ⚠️ 2026-07-09 추가 — 예전 completeExchange()는 완료 시 내 옷을 myCloset에서 직접
+                // 지웠는데, MatchRoom 쪽은 이게 빠져있어서 완료된 옷이 다음 loadMyCloset() 전까지
+                // (또는 그 필터가 안 맞으면 계속) 옷장에 남아있는 문제가 있었음 — 여기서도 동일하게
+                // 처리한다. room.theirWantList = 내가 상대에게 준(=내 옷장에서 빠져야 할) 아이템들.
+                val room = matchRooms.firstOrNull { it.id == roomId }
+                if (room != null && room.status == MatchRoomStatus.COMPLETE) {
+                    val givenAwayIds = room.theirWantList.map { it.id }.toSet()
+                    myCloset.removeAll { it.id in givenAwayIds }
+                }
             } catch (e: Exception) {
                 errorMessage = e.message
             }
