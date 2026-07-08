@@ -227,7 +227,12 @@ object AppState {
         scope.launch {
             try {
                 val res = apiCallRequired { api.getMessages(matchId.toLong()) }
-                val msgs = res.messages.map { it.toChatMessage() }
+                // ⚠️ 2026-07-08 버그 수정: 서버 응답은 "최신순 정렬"(내림차순)로 오는데, 채팅 화면은
+                // 옛날 메시지가 위/최근 메시지가 아래로 가는 시간순(오름차순)을 기대함 — 그대로
+                // 쓰면 채팅방을 나갔다가 다시 들어올 때만(REST로 재로드될 때만) 순서가 뒤집혀 보임
+                // (실시간 소켓 메시지는 한 개씩 끝에 append되니까 증상이 안 드러났음). reversed()로
+                // 뒤집어서 항상 시간순으로 저장한다.
+                val msgs = res.messages.map { it.toChatMessage() }.reversed()
                 match.messages.clear()
                 match.messages.addAll(msgs)
                 apiCall { api.markMessagesRead(matchId.toLong()) }
@@ -672,7 +677,10 @@ object AppState {
         scope.launch {
             try {
                 val res = apiCallRequired { api.getMatchRoomMessages(roomId.toLong()) }
-                val msgs = res.messages.map { it.toChatMessage() }
+                // ⚠️ 2026-07-08 버그 수정: 서버가 "최신순 정렬"(내림차순)로 내려주는데 그대로 써서,
+                // 채팅방을 나갔다가 다시 들어오면(REST 재로드 시) 최근 메시지가 위쪽에 뜨는 순서
+                // 뒤집힘 버그가 있었음 — loadMessages와 동일한 원인/수정.
+                val msgs = res.messages.map { it.toChatMessage() }.reversed()
                 room.messages.clear()
                 room.messages.addAll(msgs)
                 apiCall { api.markMatchRoomMessagesRead(roomId.toLong()) }
