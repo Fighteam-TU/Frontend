@@ -1049,23 +1049,34 @@ object AppState {
 
     // ⚠️ 2026-07-09 버그 수정: matches(Exchange 단일쌍 모델) 기준만 보고 있었는데, N:M
     // 매칭룸에서 완료된 교환은 이 판정에 안 잡혀서 "완료됐는데도 옷장/받은 관심에 계속
-    // 교환중으로 남아있는" 버그로 이어졌음. matchRooms의 COMPLETE 상태도 같이 본다.
+    // 교환중으로 남아있는" 버그로 이어졌음.
+    // ⚠️ 2026-07-09 추가 수정: 반대로 matches를 계속 같이 보는 것도 위험하다는 게 드러남 —
+    // matches.myItem/theirItem은 "그 방이 처음 생성될 때"의 아이템에 고정되고, 나중에 방
+    // 선택이 완전히 다른 구성으로 바뀌어도 안 따라온다. 그래서 실제로는 한 번도 교환된 적
+    // 없는 아이템이 "예전에 그 방 생성에 관여했었다"는 이유만으로 영원히 "완료됨" 취급돼서
+    // 옷장 모아보기 등에서 안 보이는 사고로 이어졌음(실측 확인 — "도라에몽 대나무 헬리콥터").
+    // roomId==exchangeId라 matchRooms가 레거시 1:1 교환까지 포함해서 다 보여주므로(스펙
+    // 확인됨), matches는 완전히 배제하고 matchRooms만 기준으로 삼는다.
     // isItemCompleted = "내 물건"이 포함된 완료된 교환(옷장/받은관심에서 걸러낼 때 씀).
     fun isItemCompleted(itemId: Int): Boolean =
-        matches.any { it.status == ExchangeStatus.COMPLETE && it.myItem.id == itemId } ||
-            matchRooms.any { it.status == MatchRoomStatus.COMPLETE && it.theirWantList.any { item -> item.id == itemId } }
+        matchRooms.any { it.status == MatchRoomStatus.COMPLETE && it.theirWantList.any { item -> item.id == itemId } }
 
     // isTheirItemCompleted = "상대 물건"이 포함된 완료된 교환(보낸관심/옷장모아보기에서 걸러낼 때 씀).
     fun isTheirItemCompleted(itemId: Int): Boolean =
-        matches.any { it.status == ExchangeStatus.COMPLETE && it.theirItem.id == itemId } ||
-            matchRooms.any { it.status == MatchRoomStatus.COMPLETE && it.myWantList.any { item -> item.id == itemId } }
+        matchRooms.any { it.status == MatchRoomStatus.COMPLETE && it.myWantList.any { item -> item.id == itemId } }
 
     /** 옷장 모아보기에서 아이템을 숨길지 판단 — SHIPPING 이상(양쪽 다 배송 시작)이면 숨김.
-     *  MATCHED/CONFIRMED까지는 계속 보여줘서(하트 토글 등) 다른 옷도 둘러볼 수 있게 한다. */
+     *  MATCHED/CONFIRMED까지는 계속 보여줘서(하트 토글 등) 다른 옷도 둘러볼 수 있게 한다.
+     *  ⚠️ 2026-07-09 버그 수정: matches(Exchange 단일쌍 모델) 기준을 같이 보고 있었는데, 이
+     *  모델의 theirItem은 "그 방이 처음 생성될 때"의 아이템에 고정되고 이후 매칭룸에서 선택이
+     *  바뀌어도 안 따라옴 — 실측으로 확인된 사례: 상대(HHHH)가 예전에 여러 번 방을 만들었다
+     *  취소하는 과정에서 "도라에몽 대나무 헬리콥터"(item 13)가 한 번 그 프로세스에 걸렸었는데,
+     *  그 방이 나중에 완전히 다른 아이템 구성으로 진행되어 COMPLETE됐음에도 legacy Exchange
+     *  레코드의 theirItem은 여전히 13으로 고정돼 있어서, 실제로는 한 번도 교환된 적 없고
+     *  지금도 상대 옷장에 `listed`로 멀쩡히 남아있는 아이템이 "옷장 모아보기"에서 영원히 안
+     *  보이는 버그로 이어졌음. matchRooms(실시간 데이터)만 기준으로 삼는다. */
     fun isTheirItemShippedOrCompleted(itemId: Int): Boolean =
-        matches.any {
-            it.theirItem.id == itemId && (it.status == ExchangeStatus.SHIPPING || it.status == ExchangeStatus.COMPLETE)
-        } || matchRooms.any { room ->
+        matchRooms.any { room ->
             (room.status == MatchRoomStatus.SHIPPING || room.status == MatchRoomStatus.COMPLETE) &&
                 room.myWantList.any { it.id == itemId }
         }
@@ -1075,11 +1086,10 @@ object AppState {
     //    (하트 토글로 다른 옷도 둘러보는 메리트가 사라짐) — "양쪽 다 배송 시작(SHIPPING) 이상"
     //    일 때만 숨기도록 완화함. 그 전까지는 "받은 관심"에 남아있되 매칭중 표시만 해준다.
     //    CANCELLED는 당연히 제외 — 취소됐으면 다시 판단할 수 있게 계속 나와야 함.
+    //    ⚠️ 2026-07-09: 여기도 matches 기반 체크가 프리즌(고정) 데이터라 같은 버그를 만들 수
+    //    있어서 matchRooms만 기준으로 삼는다.
     fun hasActiveOrCompletedExchangeWith(myItemId: Int, partnerUserId: Int): Boolean =
-        matches.any {
-            it.myItem.id == myItemId && it.partner.id == partnerUserId &&
-                (it.status == ExchangeStatus.SHIPPING || it.status == ExchangeStatus.COMPLETE)
-        } || matchRooms.any { room ->
+        matchRooms.any { room ->
             room.partner.id == partnerUserId &&
                 (room.status == MatchRoomStatus.SHIPPING || room.status == MatchRoomStatus.COMPLETE) &&
                 room.theirWantList.any { it.id == myItemId }
