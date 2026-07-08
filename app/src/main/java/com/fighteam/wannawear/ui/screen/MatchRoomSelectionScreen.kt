@@ -36,18 +36,19 @@ import com.fighteam.wannawear.ui.theme.*
 fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
     val room = AppState.matchRooms.firstOrNull { it.id == roomId }
     var candidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
-    // ⚠️ 2026-07-08 정정: modificationProposedItemIds는 "내가 받고 싶은 상대 아이템"이 아니라
-    // 라이브 실측으로 확정된 대로 요청자(상대)가 원하는 "내(수신자) 소유 아이템"의 id들이다 —
-    // 즉 이 화면(내가 받고 싶은, 상대 소유 아이템을 고르는 화면)과는 아예 다른 아이템 세계라
-    // 체크박스를 미리 체크해주는 건 의미가 없다(아이디가 안 겹쳐서 어차피 아무것도 안 체크됨).
-    // 대신 내 옷장(AppState.myCloset)에서 이름을 찾아 "상대가 당신의 이 옷들을 원해요"라고
-    // 정보성으로만 보여준다 — 실제 그 옷을 넘길지는 상대의 좋아요/선택으로 자연히 반영됨.
-    val proposedItemNames = room?.takeIf { it.modificationRequestedByThem }
-        ?.modificationProposedItemIds
-        ?.mapNotNull { id -> AppState.myCloset.firstOrNull { it.id == id.toInt() }?.name }
-        ?: emptyList()
+    // ⚠️ 2026-07-08 정정: 백엔드 최종 확인(backend-report-response-2026-07-08.md §4/§12)
+    // 결과, modificationProposedItemIds는 이 화면의 후보 풀(상대 소유, 내가 좋아요한 아이템)과
+    // 같은 세계가 맞고, 재선택 화면 진입 시 미리 체크해주는 게 의도된 동작이라고 확인됨.
+    val proposedByThem = room?.takeIf { it.modificationRequestedByThem }
+        ?.modificationProposedItemIds?.toSet() ?: emptySet()
+    // ⚠️ 2026-07-08 신규 — 상대가 "제시하고 싶다"고 표시한 자기 소유 아이템(§12). 강제 선택이
+    // 아니라 권유 참고용이라 미리 체크는 안 하고 카드에 배지만 붙인다.
+    val suggestedByThem = room?.modificationSuggestedOfferItemIds?.toSet() ?: emptySet()
     var selectedIds by remember(room?.id) {
-        mutableStateOf(room?.myWantList?.map { it.id }?.toSet() ?: emptySet())
+        mutableStateOf(
+            if (proposedByThem.isNotEmpty()) proposedByThem
+            else room?.myWantList?.map { it.id }?.toSet() ?: emptySet()
+        )
     }
     var isSaving by remember { mutableStateOf(false) }
 
@@ -93,8 +94,8 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
                     }
                 }
                 else -> Column {
-                    // 상대가 수정 요청과 함께 원한다고 밝힌 "내 옷"을 정보성으로 안내 (체크는 안 됨)
-                    if (proposedItemNames.isNotEmpty()) {
+                    // 상대의 수정 제안이 반영된 상태임을 알려주는 배너
+                    if (proposedByThem.isNotEmpty()) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                                 .background(AccentYellow.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
@@ -102,7 +103,7 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "${room?.partner?.name}님이 내 옷 중 ${proposedItemNames.joinToString(", ")}을(를) 받고 싶어해요",
+                                "${room?.partner?.name}님이 제안한 구성이 미리 체크돼 있어요 · 그대로 저장하거나 자유롭게 바꿔보세요",
                                 color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold
                             )
                         }
@@ -120,6 +121,7 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
                             SelectableCandidateCard(
                                 item = item,
                                 selected = selected,
+                                suggestedByPartner = item.id in suggestedByThem,
                                 onToggle = {
                                     selectedIds = if (selected) selectedIds - item.id else selectedIds + item.id
                                 }
@@ -163,6 +165,7 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
 private fun SelectableCandidateCard(
     item: ClothingItem,
     selected: Boolean,
+    suggestedByPartner: Boolean = false,
     onToggle: () -> Unit
 ) {
     Box(
@@ -178,6 +181,18 @@ private fun SelectableCandidateCard(
                 ) {
                     if (selected) {
                         Icon(Icons.Default.Check, contentDescription = "선택됨", tint = AccentYellowText, modifier = Modifier.size(16.dp))
+                    }
+                }
+                // ⚠️ 2026-07-08 추가 — 상대가 "제시하고 싶다"고 표시한 아이템(§12). 강제 선택은
+                // 아니고 참고용 권유라서 체크 상태와 별개로 항상 배지만 붙여둔다.
+                if (suggestedByPartner) {
+                    Row(
+                        Modifier.align(Alignment.TopStart).padding(8.dp)
+                            .background(StatusShipping, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("상대방이 권유한 거래 옷", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

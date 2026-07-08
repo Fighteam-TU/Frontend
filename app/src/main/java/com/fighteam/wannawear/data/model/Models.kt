@@ -59,6 +59,8 @@ data class ChatMessage(
     val type: ChatMessageType = ChatMessageType.TEXT,
     val modificationRoomId: Int? = null,
     val modificationProposedItemIds: List<Int> = emptyList(),
+    // ⚠️ 2026-07-08 추가 — 백엔드 최종 스펙 §7 payload에 포함됨
+    val modificationSuggestedOfferItemIds: List<Int> = emptyList(),
     val modificationCtaLabel: String = "교환 재선택하러 가기"
 )
 
@@ -134,7 +136,9 @@ data class MatchRoom(
     val cancelledByMe: Boolean? = null,
     val modificationRequestedByMe: Boolean = false,
     val modificationRequestedByThem: Boolean = false,
-    val modificationProposedItemIds: List<Int> = emptyList()
+    val modificationProposedItemIds: List<Int> = emptyList(),
+    // ⚠️ 2026-07-08 추가 — 요청자가 "제시하고 싶다"고 표시한 자기 소유 아이템 id들(권유 참고용)
+    val modificationSuggestedOfferItemIds: List<Int> = emptyList()
 )
 
 // ─────────────────────────────────────────────────────────────────────

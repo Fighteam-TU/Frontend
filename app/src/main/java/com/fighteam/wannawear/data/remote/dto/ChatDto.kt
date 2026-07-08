@@ -21,6 +21,8 @@ data class MessageResponse(
 data class MessagePayloadDto(
     val roomId: Long? = null,
     val proposedItemIds: List<Long>? = null,
+    // ⚠️ 2026-07-08 추가 — 백엔드 최종 스펙 §7
+    val suggestedOfferItemIds: List<Long>? = null,
     val ctaLabel: String? = null
 )
 

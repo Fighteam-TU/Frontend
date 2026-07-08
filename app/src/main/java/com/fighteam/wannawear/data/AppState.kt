@@ -627,23 +627,32 @@ object AppState {
     }
 
     /** SHIPPING 이전 상태에서만 가능 — 상태를 SELECTING으로 롤백. 성공 시 서버가 채팅 커스텀
-     *  메시지 + 상대방 토스트 + 알림을 알아서 발송해준다(문서 §6 기준). */
-    fun requestMatchRoomModification(roomId: Int, proposedItemIds: List<Int>, onResult: (Boolean) -> Unit = {}) {
+     *  메시지 + 상대방 토스트 + 알림을 알아서 발송해준다(문서 §6 기준).
+     *  ⚠️ 2026-07-08: 백엔드가 suggestedOfferItemIds 필드를 정식 지원하게 되어(문서 §12),
+     *  기존에 채팅 텍스트로 우회 전달하던 "내가 제시하는 옷" 정보를 이제 정식 필드로 같이 보낸다. */
+    fun requestMatchRoomModification(
+        roomId: Int,
+        proposedItemIds: List<Int>,
+        suggestedOfferItemIds: List<Int> = emptyList(),
+        onResult: (Boolean) -> Unit = {}
+    ) {
         scope.launch {
             try {
                 apiCall {
-                    api.requestMatchRoomModification(roomId.toLong(), ModificationRequest(proposedItemIds.map { it.toLong() }))
+                    api.requestMatchRoomModification(
+                        roomId.toLong(),
+                        ModificationRequest(
+                            proposedItemIds = proposedItemIds.map { it.toLong() },
+                            suggestedOfferItemIds = suggestedOfferItemIds.map { it.toLong() }
+                        )
+                    )
                 }
                 refreshMatchRoomDetail(roomId)
                 onResult(true)
             } catch (e: ApiException) {
                 errorMessage = when (e.errorBody?.code) {
-                    // ⚠️ 예전엔 이 코드를 무조건 "이미 발송된 교환은..."으로 번역했는데, 실측 결과
-                    // 아직 발송 전(SELECTING)인 방에서도 이 코드가 내려오는 경우가 있었음(원인은
-                    // 백엔드 확인 필요 — backend-전달사항.md 기록). 서버가 준 메시지를 우선 보여주고,
-                    // 없을 때만 일반적인 안내로 대체한다.
-                    "MODIFICATION_NOT_ALLOWED" ->
-                        e.errorBody.message ?: "지금은 수정 요청을 할 수 없는 상태예요"
+                    "MODIFICATION_NOT_ALLOWED" -> e.errorBody.message ?: "지금은 수정 요청을 할 수 없는 상태예요"
+                    "ITEM_NOT_IN_CANDIDATES"   -> e.errorBody.message ?: "제시하는 아이템은 본인 소유의 아이템만 가능해요"
                     else -> e.message
                 }
                 onResult(false)
@@ -1090,20 +1099,12 @@ object AppState {
     /** 상단 배지/그룹 계산에 쓰는, SHIPPING 이전 매칭룸 전체 목록 */
     fun activeMatchRooms(): List<MatchRoom> = matchRooms.filter { it.status in activeRoomStatuses }
 
-    // ⚠️ 2026-07-07 발견 — 같은 상대와 SELECTING 단계 매칭룸이 2개 이상 생기는 사례 발견.
-    // 라이브 서버 실측(GET /api/match-rooms)으로 원인 확정: "교환 수정 요청"(POST
-    // /api/match-rooms/{id}/request-modification)을 호출할 때마다 기존 방을 SELECTING으로
-    // 되돌리는 게 아니라 매번 새 방을 만들어버림. 100% 백엔드 쪽 버그로 backend-전달사항.md에
-    // 기록해서 전달함 — 근본 수정은 백엔드 담당.
-    // ⚠️ 2026-07-08: 프론트에서 "합치기"(내 선택 이관 + 중복 방 취소) 기능을 임시로 넣었었는데,
-    // cancelMatchRoom이 상대의 좋아요 레코드까지 지워버리는 별개의 백엔드 버그와 겹쳐서 실제
-    // 사용자 데이터(상대가 보낸 관심)가 유실되는 사고로 이어졌다. 그래서 자동 정리 기능은 완전히
-    // 제거함 — 중복 방은 그냥 각자 따로 두고, 취소는 사용자가 상황을 이해한 뒤 신중하게 직접
-    // "취소하기" 버튼으로만 하도록 한다(취소 확인 다이얼로그에 좋아요 유실 경고 문구 추가함).
-    /** 같은 상대에 대해 활성(SHIPPING 이전) 매칭룸이 여러 개인 경우들을 묶어서 반환 — 참고/진단용,
-     *  자동 정리 액션은 없음. */
-    fun duplicateActiveRoomGroups(): List<List<MatchRoom>> =
-        activeMatchRooms().groupBy { it.partner.id }.values.filter { it.size > 1 }
+    // ⚠️ 2026-07-08 백엔드 확인 완료 — 2026-07-07에 발견했던 "같은 상대와 중복 방 생성" 현상은
+    // 실제로는 그 시점(2026-07-03) 이전의 레거시 toggle() 로직(활성 방 존재 체크 없이 무조건
+    // 새 Exchange 생성)이 남긴 과거 데이터였고, 현재 로직(findActiveRoomsBetweenUsers + 유저쌍
+    // 락)으로는 재현 불가함을 백엔드가 DB/로그 조사로 확정함(backend-report-response-2026-07-08.md
+    // §13.1). 그래서 여기 있던 "중복 방 그룹 조회/자동 정리" 관련 코드는 전부 제거함 — 더 이상
+    // 필요 없음.
 
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {

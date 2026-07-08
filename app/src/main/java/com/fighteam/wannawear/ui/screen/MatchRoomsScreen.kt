@@ -114,8 +114,8 @@ fun MatchRoomsScreen(
             ModificationRequestDialog(
                 room = room,
                 onDismiss = { modificationRoomId = null },
-                onSubmit = { itemIds ->
-                    AppState.requestMatchRoomModification(roomId, itemIds)
+                onSubmit = { wantItemIds, offerItemIds ->
+                    AppState.requestMatchRoomModification(roomId, wantItemIds, offerItemIds)
                     modificationRoomId = null
                 }
             )
@@ -666,19 +666,14 @@ private fun RoomReviewDialog(
 private fun ModificationRequestDialog(
     room: MatchRoom,
     onDismiss: () -> Unit,
-    onSubmit: (List<Int>) -> Unit
+    onSubmit: (proposedItemIds: List<Int>, suggestedOfferItemIds: List<Int>) -> Unit
 ) {
-    // ⚠️ 2026-07-08 재수정 — 라이브 실측으로 확정: 서버의 request-modification은
-    // theirWantList/theirCandidates(상대에게 넘길 내 옷)가 아니라 myWantList/myCandidates
-    // (내가 상대에게서 받고 싶은 옷)를 기준으로 검증함 — theirWantList를 그대로 보내면
-    // ITEM_NOT_IN_CANDIDATES로 거절되고, myWantList를 보내면 성공하는 걸 직접 확인함.
-    // 그래서 실제로 서버에 "요청"으로 제출되는 건 이 목록뿐이다.
-    //
-    // ✅ 추가 요청사항: 그래도 "내가 교환으로 제시하고 싶은 내 옷"도 같이 고를 수 있게 해달라는
-    // 요청 반영 — 다만 서버 API에 이 정보를 넣을 필드가 없어서(ModificationRequest는
-    // proposedItemIds 하나뿐), 강제로 선택되는 게 아니라 "권유" 느낌으로 채팅에 제안 메시지를
-    // 같이 보내는 방식으로 구현. 상대는 실제 선택(잠금)은 자기 화면에서 직접 하고, 이 메시지는
-    // 참고용 힌트일 뿐이다.
+    // ⚠️ 2026-07-08 백엔드 최종 스펙 확정(backend-report-response-2026-07-08.md §12):
+    // proposedItemIds(내가 받고 싶은 상대 아이템)와 suggestedOfferItemIds(내가 제시하고 싶은
+    // 내 아이템, 본인 소유만 검증)를 request-modification 요청 바디에 같이 보내는 정식 필드로
+    // 지원하게 됨 — 예전엔 후자를 채팅 텍스트로 우회 전달했는데 이제 정식 API로 전송한다.
+    // 상대는 GET /match-rooms/{id}의 modificationSuggestedOfferItemIds로 조회해서 재선택
+    // 화면에서 "상대가 권유한 아이템" 배지로 보게 된다(MatchRoomSelectionScreen 참고).
     var myItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
     var theirItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
     var wantSelectedIds by remember { mutableStateOf(room.myWantList.map { it.id }.toSet()) }
@@ -737,18 +732,9 @@ private fun ModificationRequestDialog(
         confirmButton = {
             TextButton(onClick = {
                 val availableWantIds = (mergedWantCandidates ?: emptyList()).map { it.id }.toSet()
-                onSubmit(wantSelectedIds.filter { it in availableWantIds })
-
-                // 제시 옷 제안은 서버에 넣을 필드가 없어서 채팅 메시지로 권유 형태로 전달
-                val offerNames = (mergedOfferCandidates ?: emptyList())
-                    .filter { it.id in offerSelectedIds }
-                    .map { it.name }
-                if (offerNames.isNotEmpty()) {
-                    AppState.sendMatchRoomMessage(
-                        room.id,
-                        "제가 교환으로 드리고 싶은 옷을 제안드려요: ${offerNames.joinToString(", ")} (다시 고르실 때 참고해주세요!)"
-                    )
-                }
+                // suggestedOfferItemIds는 서버가 "본인 소유 여부"만 검증하므로(§12), 후보 목록
+                // 필터링 없이 체크된 그대로 보낸다.
+                onSubmit(wantSelectedIds.filter { it in availableWantIds }, offerSelectedIds.toList())
             }) {
                 Text("수정 요청 보내기", color = AccentYellow, fontWeight = FontWeight.Bold)
             }

@@ -1,10 +1,9 @@
 package com.fighteam.wannawear.data.remote.dto
 
 /**
- * MatchRoom API DTO — 백엔드 전달 문서 "match-room-spec.md" v0.1 초안 기준 (2026-07-04).
- * ⚠️ 아직 백엔드에 실제로 배포되지 않은 설계 제안 단계입니다. 필드명/엔드포인트가 실제 구현
- * 중 바뀔 수 있고, 라이브 서버로 검증하지 못한 상태입니다 — 문서가 갱신되면 이 파일도 맞춰서
- * 수정해야 합니다.
+ * MatchRoom API DTO — 백엔드 최종 스펙 문서(backend-report-response-2026-07-08.md) 기준.
+ * ⚠️ 2026-07-08: 백엔드가 전체 스펙을 확정/구현/검증 완료했다고 전달함. 오늘부로 이 문서를
+ * 기준으로 필드 갱신함 (suggestedOfferItemIds 신규 추가 등).
  */
 
 data class MatchRoomResponse(
@@ -32,14 +31,14 @@ data class MatchRoomResponse(
     val modificationRequestedByMe: Boolean? = null,
     val modificationRequestedByThem: Boolean? = null,
     val modificationProposedItemIds: List<Long>? = null,
+    // ⚠️ 2026-07-08 신규 — 요청자가 "제시하고 싶다"고 표시한 자기 소유 아이템 id들(권유 참고용).
+    val modificationSuggestedOfferItemIds: List<Long>? = null,
 
     val lastMessage: LastMessageDto? = null,
     // ⚠️ v1.0 확정 스펙: createdAt/updatedAt이 아니라 matchedAt 하나만 내려옴 (ExchangeResponse와 동일한 필드명)
     val matchedAt: String? = null
 )
 
-// ⚠️ 목록 응답의 정확한 wrapper 키 이름이 문서에 명시돼 있지 않아 기존 컨벤션(exchanges, notifications 등)에
-// 맞춰 "matchRooms"로 가정함 — 실제 API 붙일 때 확인 필요.
 data class MatchRoomListEnvelope(
     val matchRooms: List<MatchRoomResponse> = emptyList(),
     val total: Long? = null
@@ -55,7 +54,10 @@ data class SelectionRequest(
 )
 
 data class ModificationRequest(
-    val proposedItemIds: List<Long>
+    val proposedItemIds: List<Long>,
+    // ⚠️ 2026-07-08 신규(선택 필드) — 요청자 본인 소유 아이템만 가능, 검증은 후보풀이 아니라
+    // "본인 소유 여부"로 이뤄짐. 생략 시 서버가 빈 목록으로 처리.
+    val suggestedOfferItemIds: List<Long>? = null
 )
 
 /** lock-selection/confirm/ship/complete/cancel/request-modification 응답 공통 형태

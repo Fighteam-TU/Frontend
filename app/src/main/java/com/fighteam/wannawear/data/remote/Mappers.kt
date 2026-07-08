@@ -142,6 +142,7 @@ fun MessageResponse.toChatMessage(): ChatMessage = ChatMessage(
     type      = parseChatMessageType(type),
     modificationRoomId          = payload?.roomId?.toClientId(),
     modificationProposedItemIds = payload?.proposedItemIds?.map { it.toClientId() } ?: emptyList(),
+    modificationSuggestedOfferItemIds = payload?.suggestedOfferItemIds?.map { it.toClientId() } ?: emptyList(),
     modificationCtaLabel        = payload?.ctaLabel ?: "교환 재선택하러 가기"
 )
 
@@ -224,5 +225,6 @@ fun MatchRoomResponse.toMatchRoom(): MatchRoom = MatchRoom(
     cancelledByMe  = cancelledByMe,
     modificationRequestedByMe   = modificationRequestedByMe ?: false,
     modificationRequestedByThem = modificationRequestedByThem ?: false,
-    modificationProposedItemIds = modificationProposedItemIds?.map { it.toClientId() } ?: emptyList()
+    modificationProposedItemIds = modificationProposedItemIds?.map { it.toClientId() } ?: emptyList(),
+    modificationSuggestedOfferItemIds = modificationSuggestedOfferItemIds?.map { it.toClientId() } ?: emptyList()
 )
