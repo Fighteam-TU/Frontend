@@ -114,8 +114,27 @@ fun MatchRoomsScreen(
             ModificationRequestDialog(
                 room = room,
                 onDismiss = { modificationRoomId = null },
-                onSubmit = { wantItemIds, offerItemIds ->
-                    AppState.requestMatchRoomModification(roomId, wantItemIds, offerItemIds)
+                onSubmit = { wantItems, offerItems ->
+                    if (room.status == MatchRoomStatus.SELECTING) {
+                        // ⚠️ 2026-07-09 추가 — 요청사항: 아이템 선택을 확정(잠금)하기 전에도 제안을
+                        // 보낼 수 있게 해달라는 요청. 그런데 서버는 SELECTING 상태에서
+                        // request-modification 자체를 막아뒀음(라이브 검증 완료 — "이미 선택을
+                        // 진행 중이에요"로 거절). 정식 API가 안 열려있는 단계라 채팅 메시지로
+                        // 같은 내용(받고 싶은 옷 + 제시하는 옷)을 전달하는 방식으로 우회한다.
+                        // 백엔드에 SELECTING 단계도 정식으로 허용해달라고 요청해뒀음.
+                        val wantNames = wantItems.joinToString(", ") { it.name }
+                        val offerNames = offerItems.joinToString(", ") { it.name }
+                        val text = buildString {
+                            append("교환 제안을 보내요 🙂")
+                            if (wantNames.isNotEmpty()) append("\n받고 싶은 옷: $wantNames")
+                            if (offerNames.isNotEmpty()) append("\n제가 드리고 싶은 옷: $offerNames")
+                        }
+                        AppState.sendMatchRoomMessage(roomId, text)
+                    } else {
+                        AppState.requestMatchRoomModification(
+                            roomId, wantItems.map { it.id }, offerItems.map { it.id }
+                        )
+                    }
                     modificationRoomId = null
                 }
             )
@@ -258,12 +277,13 @@ private fun MatchRoomCard(
         MatchRoomStatus.COMPLETE  -> Pair(StatusComplete, StatusComplete.copy(alpha = 0.12f))
         MatchRoomStatus.CANCELLED -> Pair(TextTertiary, TextTertiary.copy(alpha = 0.12f))
     }
-    // ⚠️ 라이브 검증(2026-07-08): 첫 SELECTING(아직 한 번도 안 잠근 방)에서 request-modification을
-    // 호출하면 서버가 MODIFICATION_NOT_ALLOWED로 거절함. 하지만 상대가 수정요청을 보내서 방이
-    // MATCHED/CONFIRMED에서 SELECTING으로 되돌아온 경우(modificationRequestedByThem=true)엔,
-    // 나도 다른 구성으로 맞받아 제안할 수 있어야 하니 이 경우엔 버튼을 계속 보여준다.
-    val canRequestModification = room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED ||
-        (room.status == MatchRoomStatus.SELECTING && room.modificationRequestedByThem)
+    // ⚠️ 2026-07-09 — 요청사항: 아이템 선택 확정 전(SELECTING)에도 교환 제안을 보낼 수 있게
+    // 해달라는 요청 반영. 서버가 SELECTING 단계에서 request-modification API 자체를 막아뒀지만
+    // (라이브 검증 완료 — "이미 선택을 진행 중이에요"), 채팅으로 같은 내용을 전달하는 방식으로
+    // 우회 지원한다(ModificationRequestDialog의 onSubmit에서 분기). SHIPPING 이후는 여전히 불가.
+    val canRequestModification = room.status == MatchRoomStatus.SELECTING ||
+        room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED
+    val modificationButtonLabel = if (room.status == MatchRoomStatus.SELECTING) "교환 제안 보내기" else "교환 수정 요청"
     val canCancel = room.status != MatchRoomStatus.COMPLETE && room.status != MatchRoomStatus.CANCELLED
 
     Column(
@@ -452,7 +472,7 @@ private fun MatchRoomCard(
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusShipping)
                     ) {
-                        Text("교환 수정 요청", fontSize = 12.sp)
+                        Text("${modificationButtonLabel}", fontSize = 12.sp)
                     }
                 }
                 if (canCancel) {
@@ -666,7 +686,7 @@ private fun RoomReviewDialog(
 private fun ModificationRequestDialog(
     room: MatchRoom,
     onDismiss: () -> Unit,
-    onSubmit: (proposedItemIds: List<Int>, suggestedOfferItemIds: List<Int>) -> Unit
+    onSubmit: (wantItems: List<ClothingItem>, offerItems: List<ClothingItem>) -> Unit
 ) {
     // ⚠️ 2026-07-08 백엔드 최종 스펙 확정(backend-report-response-2026-07-08.md §12):
     // proposedItemIds(내가 받고 싶은 상대 아이템)와 suggestedOfferItemIds(내가 제시하고 싶은
@@ -674,6 +694,12 @@ private fun ModificationRequestDialog(
     // 지원하게 됨 — 예전엔 후자를 채팅 텍스트로 우회 전달했는데 이제 정식 API로 전송한다.
     // 상대는 GET /match-rooms/{id}의 modificationSuggestedOfferItemIds로 조회해서 재선택
     // 화면에서 "상대가 권유한 아이템" 배지로 보게 된다(MatchRoomSelectionScreen 참고).
+    //
+    // ⚠️ 2026-07-09 추가 — SELECTING 단계(아직 선택 잠그기 전)에서는 서버가 이 API 자체를
+    // 막아뒀어서(라이브 검증됨), 이 화면은 그대로 두고 호출부(MatchRoomsScreen)에서 SELECTING인
+    // 경우 정식 API 대신 채팅 메시지로 우회 전송한다 — 그래서 이름까지 알아야 해 List<ClothingItem>
+    // 을 그대로 넘긴다.
+    val isPreLock = room.status == MatchRoomStatus.SELECTING
     var myItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
     var theirItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
     var wantSelectedIds by remember { mutableStateOf(room.myWantList.map { it.id }.toSet()) }
@@ -693,11 +719,13 @@ private fun ModificationRequestDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("교환 수정 요청", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+        title = { Text(if (isPreLock) "교환 제안 보내기" else "교환 수정 요청", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
         text = {
             Column(Modifier.heightIn(max = 460.dp)) {
                 Text(
-                    "받고 싶은 옷과 내가 제시할 옷을 둘 다 고를 수 있어요. 제시하는 쪽은 실제로 정해지는 건 아니고, ${room.partner.name}님이 다시 고를 때 참고할 제안이에요.",
+                    if (isPreLock)
+                        "아직 선택을 잠그기 전이라, 원하는 구성을 채팅 메시지로 먼저 제안해볼 수 있어요. 실제 선택은 서로 \"아이템 선택하기\"에서 직접 하는 거예요."
+                        else "받고 싶은 옷과 내가 제시할 옷을 둘 다 고를 수 있어요. 제시하는 쪽은 실제로 정해지는 건 아니고, ${room.partner.name}님이 다시 고를 때 참고할 제안이에요.",
                     color = TextSecondary, fontSize = 12.sp
                 )
                 Spacer(Modifier.height(12.dp))
@@ -716,7 +744,9 @@ private fun ModificationRequestDialog(
                 Text("내가 교환으로 제시하는 옷", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "체크한 옷은 강제로 정해지는 게 아니라, ${room.partner.name}님이 다시 고를 때 \"상대방이 권유한 거래 옷\"으로 표시돼요.",
+                    if (isPreLock)
+                        "체크한 옷은 채팅 메시지에 같이 담겨서 전달돼요."
+                        else "체크한 옷은 강제로 정해지는 게 아니라, ${room.partner.name}님이 다시 고를 때 \"상대방이 권유한 거래 옷\"으로 표시돼요.",
                     color = TextTertiary, fontSize = 10.sp
                 )
                 Spacer(Modifier.height(6.dp))
@@ -732,11 +762,11 @@ private fun ModificationRequestDialog(
         confirmButton = {
             TextButton(onClick = {
                 val availableWantIds = (mergedWantCandidates ?: emptyList()).map { it.id }.toSet()
-                // suggestedOfferItemIds는 서버가 "본인 소유 여부"만 검증하므로(§12), 후보 목록
-                // 필터링 없이 체크된 그대로 보낸다.
-                onSubmit(wantSelectedIds.filter { it in availableWantIds }, offerSelectedIds.toList())
+                val wantItems = (mergedWantCandidates ?: emptyList()).filter { it.id in wantSelectedIds && it.id in availableWantIds }
+                val offerItems = (mergedOfferCandidates ?: emptyList()).filter { it.id in offerSelectedIds }
+                onSubmit(wantItems, offerItems)
             }) {
-                Text("수정 요청 보내기", color = AccentYellow, fontWeight = FontWeight.Bold)
+                Text(if (isPreLock) "제안 보내기" else "수정 요청 보내기", color = AccentYellow, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = TextTertiary) } }
