@@ -58,7 +58,8 @@ private fun MatchRoom.matchesFilter(filter: RoomFilter): Boolean = when (filter)
 @Composable
 fun MatchRoomsScreen(
     onOpenChat: (Int) -> Unit,
-    onSelectItems: (Int) -> Unit
+    onSelectItems: (Int) -> Unit,
+    onNavigateToShipping: (Int) -> Unit = {}
 ) {
     val rooms = AppState.matchRooms
     var isRefreshing by remember { mutableStateOf(false) }
@@ -246,7 +247,13 @@ fun MatchRoomsScreen(
                                     if (result is ConfirmResult.NeedsAddress) addressPromptRoomId = room.id
                                 }
                             },
-                            onShip            = { AppState.shipMatchRoom(room.id) },
+                            onShip            = {
+                                // ⚠️ 2026-07-09 버그 수정: 여기서 바로 shipMatchRoom을 호출해서
+                                // 예전에 있던 주소 확인/배송 안내 화면(ShippingGuideScreen)을 아예
+                                // 안 거치고 바로 발송 처리됐음 — 화면으로 이동하도록 되돌림. 실제
+                                // 발송 액션은 그 화면의 "배송 완료" 버튼에서 함.
+                                onNavigateToShipping(room.id)
+                            },
                             onComplete        = { AppState.completeMatchRoom(room.id) },
                             onRequestCancel   = { cancelConfirmRoomId = room.id },
                             onRequestModification = { modificationRoomId = room.id }
@@ -399,15 +406,18 @@ private fun MatchRoomCard(
             MatchRoomStatus.CONFIRMED -> {
                 Button(
                     onClick = onShip,
-                    enabled = !room.myShipped,
+                    // ⚠️ 이제 이 버튼은 실제 발송 처리가 아니라 배송 안내/주소 확인 화면으로
+                    // 이동하는 버튼이라, 이미 내가 발송해도(myShipped) 주소를 다시 보거나 안내를
+                    // 다시 볼 수 있게 항상 눌리게 둔다 — 실제 발송 액션은 그 화면 안에 있음.
                     modifier = Modifier.fillMaxWidth().height(44.dp),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = StatusShipping.copy(alpha = 0.15f), contentColor = StatusShipping,
-                        disabledContainerColor = BgCardDark, disabledContentColor = TextTertiary
+                        containerColor = StatusShipping.copy(alpha = 0.15f), contentColor = StatusShipping
                     )
                 ) {
-                    Text(if (room.myShipped) "상대방 발송 대기 중" else "발송 완료(한 박스로)", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                    Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (room.myShipped) "배송 안내 다시 보기 (상대방 발송 대기 중)" else "배송 안내 보기 · 발송하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
                 }
             }
             MatchRoomStatus.SHIPPING -> {
