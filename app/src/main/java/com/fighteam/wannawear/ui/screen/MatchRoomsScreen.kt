@@ -664,22 +664,22 @@ private fun ModificationRequestDialog(
     onDismiss: () -> Unit,
     onSubmit: (List<Int>) -> Unit
 ) {
-    // ✅ 2026-07-08 의미 수정: "교환 수정 요청"은 **상대에게 넘길 내 옷 구성**을 바꿔달라는 요청이다
-    //    (예: "내 옷은 이 2개로 교환하고 싶어요"). 예전엔 반대로 "내가 받고 싶은 상대 옷"을 고르게
-    //    돼있었음 — 그래서 후보도 상대 아이템(myCandidates)이 아니라 내 아이템(theirCandidates:
-    //    상대가 좋아요한 내 옷들)을 보여주고, 현재 상대가 받기로 돼있는 목록(theirWantList)을
-    //    기본 체크로 시작한다. 상대는 이 제안을 받으면 재선택 화면에서 제안된 옷들이 미리 체크된
-    //    상태로 보게 된다(MatchRoomSelectionScreen 참고).
+    // ⚠️ 2026-07-08 재수정 — 라이브 실측으로 확정: 서버의 request-modification은
+    // theirWantList/theirCandidates(상대에게 넘길 내 옷)가 아니라 myWantList/myCandidates
+    // (내가 상대에게서 받고 싶은 옷)를 기준으로 검증함 — theirWantList를 그대로 보내면
+    // ITEM_NOT_IN_CANDIDATES로 거절되고, myWantList를 보내면 성공하는 걸 직접 확인함.
+    // (사용자가 설명한 "상대에게 넘길 내 옷을 고르는 것"이라는 의도와 실제 서버 동작이 다름 —
+    // 백엔드에 문의해뒀고, 일단은 실제로 동작하는 방향으로 맞춘다.)
     var myItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
-    var selectedIds by remember { mutableStateOf(room.theirWantList.map { it.id }.toSet()) }
+    var selectedIds by remember { mutableStateOf(room.myWantList.map { it.id }.toSet()) }
 
     LaunchedEffect(room.id) {
-        AppState.loadMatchRoomCandidates(room.id) { _, their -> myItemCandidates = their }
+        AppState.loadMatchRoomCandidates(room.id) { my, _ -> myItemCandidates = my }
     }
 
-    // ⚠️ 서버 candidates는 "새로 고를 수 있는 후보"만 주고, 이미 이 방에서 상대가 받기로 한
-    // 내 아이템(room.theirWantList)은 빠져있을 수 있음 — 합쳐서 전부 체크/해제 가능하게 한다.
-    val mergedCandidates = myItemCandidates?.let { base -> (room.theirWantList + base).distinctBy { it.id } }
+    // ⚠️ candidates는 "새로 고를 수 있는 후보"만 주고, 이미 이 방에 선택된 아이템(room.myWantList)은
+    // 빠져있을 수 있음 — 합쳐서 전부 체크/해제 가능하게 한다.
+    val mergedCandidates = myItemCandidates?.let { base -> (room.myWantList + base).distinctBy { it.id } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -687,7 +687,7 @@ private fun ModificationRequestDialog(
         text = {
             Column {
                 Text(
-                    "${room.partner.name}님에게 넘길 내 옷 구성을 다시 골라서 제안할 수 있어요. 상대방이 확인하면 제안한 옷들이 미리 선택된 상태로 다시 고르게 돼요.",
+                    "${room.partner.name}님에게서 받고 싶은 옷을 다시 골라서 요청할 수 있어요. 상대방이 확인하면 요청한 구성이 미리 선택된 상태로 다시 고르게 돼요.",
                     color = TextSecondary, fontSize = 12.sp
                 )
                 Spacer(Modifier.height(10.dp))
@@ -698,7 +698,7 @@ private fun ModificationRequestDialog(
                     }
                 } else if (candidates.isEmpty()) {
                     Text(
-                        "상대가 좋아요한 내 옷이 아직 없어서 제안할 수 있는 옷이 없어요.",
+                        "아직 좋아요한 상대 옷이 없어서 요청할 수 있는 옷이 없어요.",
                         color = TextTertiary, fontSize = 12.sp
                     )
                 } else {
@@ -728,7 +728,10 @@ private fun ModificationRequestDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSubmit(selectedIds.toList()) }) {
+            TextButton(onClick = {
+                val availableIds = (mergedCandidates ?: emptyList()).map { it.id }.toSet()
+                onSubmit(selectedIds.filter { it in availableIds })
+            }) {
                 Text("수정 요청 보내기", color = AccentYellow, fontWeight = FontWeight.Bold)
             }
         },
