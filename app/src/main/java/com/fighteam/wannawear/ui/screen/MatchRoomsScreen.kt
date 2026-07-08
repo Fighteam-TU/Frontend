@@ -668,73 +668,118 @@ private fun ModificationRequestDialog(
     // theirWantList/theirCandidates(상대에게 넘길 내 옷)가 아니라 myWantList/myCandidates
     // (내가 상대에게서 받고 싶은 옷)를 기준으로 검증함 — theirWantList를 그대로 보내면
     // ITEM_NOT_IN_CANDIDATES로 거절되고, myWantList를 보내면 성공하는 걸 직접 확인함.
-    // (사용자가 설명한 "상대에게 넘길 내 옷을 고르는 것"이라는 의도와 실제 서버 동작이 다름 —
-    // 백엔드에 문의해뒀고, 일단은 실제로 동작하는 방향으로 맞춘다.)
+    // 그래서 실제로 서버에 "요청"으로 제출되는 건 이 목록뿐이다.
+    //
+    // ✅ 추가 요청사항: 그래도 "내가 교환으로 제시하고 싶은 내 옷"도 같이 고를 수 있게 해달라는
+    // 요청 반영 — 다만 서버 API에 이 정보를 넣을 필드가 없어서(ModificationRequest는
+    // proposedItemIds 하나뿐), 강제로 선택되는 게 아니라 "권유" 느낌으로 채팅에 제안 메시지를
+    // 같이 보내는 방식으로 구현. 상대는 실제 선택(잠금)은 자기 화면에서 직접 하고, 이 메시지는
+    // 참고용 힌트일 뿐이다.
     var myItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
-    var selectedIds by remember { mutableStateOf(room.myWantList.map { it.id }.toSet()) }
+    var theirItemCandidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
+    var wantSelectedIds by remember { mutableStateOf(room.myWantList.map { it.id }.toSet()) }
+    var offerSelectedIds by remember { mutableStateOf(room.theirWantList.map { it.id }.toSet()) }
 
     LaunchedEffect(room.id) {
-        AppState.loadMatchRoomCandidates(room.id) { my, _ -> myItemCandidates = my }
+        AppState.loadMatchRoomCandidates(room.id) { my, their ->
+            myItemCandidates = my
+            theirItemCandidates = their
+        }
     }
 
-    // ⚠️ candidates는 "새로 고를 수 있는 후보"만 주고, 이미 이 방에 선택된 아이템(room.myWantList)은
-    // 빠져있을 수 있음 — 합쳐서 전부 체크/해제 가능하게 한다.
-    val mergedCandidates = myItemCandidates?.let { base -> (room.myWantList + base).distinctBy { it.id } }
+    // ⚠️ candidates는 "새로 고를 수 있는 후보"만 주고, 이미 이 방에 선택된 아이템은 빠져있을 수
+    // 있음 — 합쳐서 전부 체크/해제 가능하게 한다.
+    val mergedWantCandidates = myItemCandidates?.let { base -> (room.myWantList + base).distinctBy { it.id } }
+    val mergedOfferCandidates = theirItemCandidates?.let { base -> (room.theirWantList + base).distinctBy { it.id } }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("교환 수정 요청", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 420.dp)) {
                 Text(
-                    "${room.partner.name}님에게서 받고 싶은 옷을 다시 골라서 요청할 수 있어요. 상대방이 확인하면 요청한 구성이 미리 선택된 상태로 다시 고르게 돼요.",
+                    "받고 싶은 옷과 내가 제시할 옷을 둘 다 고를 수 있어요. 제시하는 쪽은 실제로 정해지는 건 아니고, ${room.partner.name}님이 다시 고를 때 참고할 제안이에요.",
                     color = TextSecondary, fontSize = 12.sp
                 )
-                Spacer(Modifier.height(10.dp))
-                val candidates = mergedCandidates
-                if (candidates == null) {
-                    Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = AccentYellow, modifier = Modifier.size(20.dp))
-                    }
-                } else if (candidates.isEmpty()) {
-                    Text(
-                        "아직 좋아요한 상대 옷이 없어서 요청할 수 있는 옷이 없어요.",
-                        color = TextTertiary, fontSize = 12.sp
-                    )
-                } else {
-                    Column(Modifier.heightIn(max = 280.dp)) {
-                        candidates.forEach { item ->
-                            val checked = item.id in selectedIds
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .clickable {
-                                        selectedIds = if (checked) selectedIds - item.id else selectedIds + item.id
-                                    }
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = checked,
-                                    onCheckedChange = { selectedIds = if (it) selectedIds + item.id else selectedIds - item.id },
-                                    colors = CheckboxDefaults.colors(checkedColor = AccentYellow)
-                                )
-                                AsyncImage(item.image, null, modifier = Modifier.size(36.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
-                                Spacer(Modifier.width(8.dp))
-                                Text(item.name, color = TextPrimary, fontSize = 12.sp, maxLines = 1)
-                            }
-                        }
-                    }
-                }
+                Spacer(Modifier.height(12.dp))
+
+                Text("${room.partner.name}님에게서 받고 싶은 옷", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                CandidateCheckList(
+                    candidates = mergedWantCandidates,
+                    selectedIds = wantSelectedIds,
+                    onToggle = { id, checked -> wantSelectedIds = if (checked) wantSelectedIds + id else wantSelectedIds - id },
+                    emptyText = "아직 좋아요한 상대 옷이 없어서 고를 수 있는 옷이 없어요.",
+                    maxHeight = 150.dp
+                )
+
+                Spacer(Modifier.height(14.dp))
+                Text("내가 교환으로 제시하는 옷 (제안)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                CandidateCheckList(
+                    candidates = mergedOfferCandidates,
+                    selectedIds = offerSelectedIds,
+                    onToggle = { id, checked -> offerSelectedIds = if (checked) offerSelectedIds + id else offerSelectedIds - id },
+                    emptyText = "상대가 좋아요한 내 옷이 아직 없어서 제안할 옷이 없어요.",
+                    maxHeight = 150.dp
+                )
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                val availableIds = (mergedCandidates ?: emptyList()).map { it.id }.toSet()
-                onSubmit(selectedIds.filter { it in availableIds })
+                val availableWantIds = (mergedWantCandidates ?: emptyList()).map { it.id }.toSet()
+                onSubmit(wantSelectedIds.filter { it in availableWantIds })
+
+                // 제시 옷 제안은 서버에 넣을 필드가 없어서 채팅 메시지로 권유 형태로 전달
+                val offerNames = (mergedOfferCandidates ?: emptyList())
+                    .filter { it.id in offerSelectedIds }
+                    .map { it.name }
+                if (offerNames.isNotEmpty()) {
+                    AppState.sendMatchRoomMessage(
+                        room.id,
+                        "제가 교환으로 드리고 싶은 옷을 제안드려요: ${offerNames.joinToString(", ")} (다시 고르실 때 참고해주세요!)"
+                    )
+                }
             }) {
                 Text("수정 요청 보내기", color = AccentYellow, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소", color = TextTertiary) } }
     )
+}
+
+@Composable
+private fun CandidateCheckList(
+    candidates: List<ClothingItem>?,
+    selectedIds: Set<Int>,
+    onToggle: (Int, Boolean) -> Unit,
+    emptyText: String,
+    maxHeight: androidx.compose.ui.unit.Dp
+) {
+    when {
+        candidates == null -> Box(Modifier.fillMaxWidth().height(60.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = AccentYellow, modifier = Modifier.size(18.dp))
+        }
+        candidates.isEmpty() -> Text(emptyText, color = TextTertiary, fontSize = 12.sp)
+        else -> Column(Modifier.heightIn(max = maxHeight)) {
+            candidates.forEach { item ->
+                val checked = item.id in selectedIds
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clickable { onToggle(item.id, !checked) }
+                        .padding(vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = checked,
+                        onCheckedChange = { onToggle(item.id, it) },
+                        colors = CheckboxDefaults.colors(checkedColor = AccentYellow)
+                    )
+                    AsyncImage(item.image, null, modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+                    Spacer(Modifier.width(8.dp))
+                    Text(item.name, color = TextPrimary, fontSize = 12.sp, maxLines = 1)
+                }
+            }
+        }
+    }
 }

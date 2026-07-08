@@ -36,15 +36,18 @@ import com.fighteam.wannawear.ui.theme.*
 fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
     val room = AppState.matchRooms.firstOrNull { it.id == roomId }
     var candidates by remember { mutableStateOf<List<ClothingItem>?>(null) }
-    // ✅ 상대가 "교환 수정 요청"으로 특정 구성(내가 받아갔으면 하는 상대의 옷들)을 제안한 상태라면,
-    //    제안된 아이템들이 미리 체크된 상태로 시작한다 — 그대로 저장하면 제안 수락과 같은 효과.
-    val proposedByThem = room?.takeIf { it.modificationRequestedByThem }
-        ?.modificationProposedItemIds?.toSet() ?: emptySet()
+    // ⚠️ 2026-07-08 정정: modificationProposedItemIds는 "내가 받고 싶은 상대 아이템"이 아니라
+    // 라이브 실측으로 확정된 대로 요청자(상대)가 원하는 "내(수신자) 소유 아이템"의 id들이다 —
+    // 즉 이 화면(내가 받고 싶은, 상대 소유 아이템을 고르는 화면)과는 아예 다른 아이템 세계라
+    // 체크박스를 미리 체크해주는 건 의미가 없다(아이디가 안 겹쳐서 어차피 아무것도 안 체크됨).
+    // 대신 내 옷장(AppState.myCloset)에서 이름을 찾아 "상대가 당신의 이 옷들을 원해요"라고
+    // 정보성으로만 보여준다 — 실제 그 옷을 넘길지는 상대의 좋아요/선택으로 자연히 반영됨.
+    val proposedItemNames = room?.takeIf { it.modificationRequestedByThem }
+        ?.modificationProposedItemIds
+        ?.mapNotNull { id -> AppState.myCloset.firstOrNull { it.id == id.toInt() }?.name }
+        ?: emptyList()
     var selectedIds by remember(room?.id) {
-        mutableStateOf(
-            if (proposedByThem.isNotEmpty()) proposedByThem
-            else room?.myWantList?.map { it.id }?.toSet() ?: emptySet()
-        )
+        mutableStateOf(room?.myWantList?.map { it.id }?.toSet() ?: emptySet())
     }
     var isSaving by remember { mutableStateOf(false) }
 
@@ -90,8 +93,8 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
                     }
                 }
                 else -> Column {
-                    // 상대의 수정 제안이 반영된 상태임을 알려주는 배너
-                    if (proposedByThem.isNotEmpty()) {
+                    // 상대가 수정 요청과 함께 원한다고 밝힌 "내 옷"을 정보성으로 안내 (체크는 안 됨)
+                    if (proposedItemNames.isNotEmpty()) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp)
                                 .background(AccentYellow.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
@@ -99,7 +102,7 @@ fun MatchRoomSelectionScreen(roomId: Int, onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "${room?.partner?.name}님이 제안한 구성이 미리 체크돼 있어요 · 그대로 저장하거나 자유롭게 바꿔보세요",
+                                "${room?.partner?.name}님이 내 옷 중 ${proposedItemNames.joinToString(", ")}을(를) 받고 싶어해요",
                                 color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold
                             )
                         }
