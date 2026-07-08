@@ -567,17 +567,52 @@ object AppState {
         }
     }
 
-    /** SELECTING/MATCHED/CONFIRMED에서만 가능 */
+    /** SELECTING/MATCHED/CONFIRMED에서만 가능.
+     *  ✅ 2026-07-08 추가: 취소해도 서로 좋아요가 남아있으면(다른 아이템들로) 매칭 자체가
+     *  사라지는 게 아니라 새 방으로 이어져야 한다는 요청 반영. 서버는 방 취소 시 매칭 재확인을
+     *  자동으로 안 돌리지만(실측), 좋아요를 껐다 켜면 서버가 매칭을 새로 만들어주는 걸 라이브로
+     *  확인함 — 그 경로를 취소 직후 자동으로 한 번 트리거해서 "상대와 방은 사라졌는데 서로
+     *  좋아요는 남아있는" 어정쩡한 상태를 해소한다. 이미 다른 활성 방이 있으면 건드리지 않음
+     *  (상대당 방 1개 유지). 실패해도 조용히 무시 — 이건 부가 기능이라 취소 자체는 이미 끝난 뒤임. */
     fun cancelMatchRoom(roomId: Int, onResult: (Boolean) -> Unit = {}) {
+        val room = matchRooms.firstOrNull { it.id == roomId }
         scope.launch {
             try {
                 apiCall { api.cancelMatchRoom(roomId.toLong()) }
                 val idx = matchRooms.indexOfFirst { it.id == roomId }
                 if (idx >= 0) matchRooms[idx] = matchRooms[idx].copy(status = MatchRoomStatus.CANCELLED)
                 onResult(true)
+                room?.partner?.id?.let { recreateMatchIfMutualLikesRemain(it) }
             } catch (e: Exception) {
                 errorMessage = e.message
                 onResult(false)
+            }
+        }
+    }
+
+    /** 상대와 활성 방이 없는데도 서로 좋아요가 남아있으면, 좋아요 하나를 껐다 켜서 서버의 매칭
+     *  재확인을 트리거한다(라이브 검증 완료 — 서버가 새 방을 만들어줌). */
+    private fun recreateMatchIfMutualLikesRemain(partnerId: Int) {
+        scope.launch {
+            try {
+                if (activeMatchRoomWith(partnerId) != null) return@launch // 이미 방이 있으면 건드리지 않음
+                val myLikeOnPartnerItem = sentLikes.firstOrNull { it.item.user.id == partnerId } ?: return@launch
+                val partnerStillLikesMine = receivedLikesForDisplay().any { it.fromUser.id == partnerId }
+                if (!partnerStillLikesMine) return@launch
+
+                val itemId = myLikeOnPartnerItem.item.id.toLong()
+                apiCall { api.toggleLike(itemId) }              // 껐다
+                val res = apiCallRequired { api.toggleLike(itemId) } // 다시 켜서 서버 매칭 체크 재트리거
+                val summary = res.exchange
+                if (res.matched && summary != null) {
+                    val match = summary.toMatchItem().fixItemPerspective()
+                    matches.removeAll { it.id == match.id }
+                    matches.add(0, match)
+                    pendingMatchNotifications.add(match)
+                }
+                if (res.roomId != null) refreshMatchRoomDetail(res.roomId.toClientId())
+            } catch (_: Exception) {
+                // 부가 기능 — 실패해도 사용자에게 별도 에러를 띄우지 않음(취소 자체는 이미 성공함)
             }
         }
     }
