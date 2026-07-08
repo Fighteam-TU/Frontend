@@ -107,6 +107,10 @@ object AppState {
                 launch { runCatching { loadReceivedLikes() } }
                 launch { runCatching { loadSentLikes() } }
                 launch { runCatching { loadAddresses() } }
+                // ⚠️ 2026-07-08 추가 — isItemInExchange/isTheirItemInExchange가 matchRooms 기준으로
+                // 바뀌면서, 매칭 탭에 한 번도 안 들어가도 "교환중" 배지가 정확해야 하니 로그인
+                // 직후부터 항상 최신 상태를 들고 있어야 한다.
+                launch { runCatching { loadMatchRooms() } }
             }
             // 로그인 전에 FCM 토큰이 먼저 발급됐을 수 있어서, 로그인 성공 시점에 한 번 더 등록 시도
             TokenManager.deviceToken?.let { registerDeviceToken(it) }
@@ -988,15 +992,28 @@ object AppState {
     fun consumePendingNotification(): MatchItem? =
         if (pendingMatchNotifications.isNotEmpty()) pendingMatchNotifications.removeAt(0) else null
 
-    // ── 헬퍼 ─────────────────────────────────────────────────────────
+    // ⚠️ 2026-07-08 재설계 — 사용자 리포트로 확인된 버그: isItemInExchange/isTheirItemInExchange가
+    // matches(Exchange 단일쌍 모델)를 기준으로 판정했는데, 이 모델의 myItem/theirItem은 방이
+    // "처음 생성될 때"의 아이템 쌍에 고정되고 이후 매칭룸(N:M)에서 선택이 바뀌어도 안 따라옴
+    // (roomId==exchangeId로 같은 테이블이지만, Exchange API는 그 시점의 대표 아이템만 보여주는
+    // legacy 뷰). 그래서 방 선택에서 뺀 아이템(A)은 영원히 "교환중"으로 남고, 새로 넣은 아이템
+    // (B)은 이 로직에 아예 안 잡히는 문제가 있었음 — matchRooms(실시간 선택 상태)를 기준으로
+    // 다시 판정한다. 겸사겸사 요청사항 반영: "교환중"(등록한 사람 화면의 배지) 기준 시점도
+    // 매칭 성사가 아니라 실제 발송(SHIPPING) 이후로 미룸 — 그 전까진 언제든 선택이 바뀔 수
+    // 있으니까 너무 이르게 막을 필요 없음.
+    // ⚠️ 다른 사용자에게 그 옷이 보이는지/좋아요 가능한지는 서버의 discover 피드 필터링에 달려
+    // 있어서 프론트가 직접 못 고침 — 같은 기준(발송 이후부터)으로 서버도 맞춰달라고 backend-
+    // 전달사항.md에 요청함.
+    private val inExchangeRoomStatuses = setOf(MatchRoomStatus.SHIPPING, MatchRoomStatus.COMPLETE)
+
     fun isItemInExchange(itemId: Int): Boolean =
-        matches.any { it.myItem.id == itemId && it.status != ExchangeStatus.COMPLETE && it.status != ExchangeStatus.CANCELLED }
+        matchRooms.any { room -> room.status in inExchangeRoomStatuses && room.theirWantList.any { it.id == itemId } }
 
     // ⚠️ 이전엔 이 체크가 3곳(ClosetScreen 보낸관심/옷장모아보기, SearchScreen)에 각각 복붙돼있었고,
     //    전부 CANCELLED 제외를 빼먹어서 "취소된 교환"의 상대 아이템도 계속 "교환중"으로 보이는
     //    버그가 있었음. 공용 함수로 통일.
     fun isTheirItemInExchange(itemId: Int): Boolean =
-        matches.any { it.theirItem.id == itemId && it.status != ExchangeStatus.COMPLETE && it.status != ExchangeStatus.CANCELLED }
+        matchRooms.any { room -> room.status in inExchangeRoomStatuses && room.myWantList.any { it.id == itemId } }
 
     fun isItemCompleted(itemId: Int): Boolean =
         matches.any { it.status == ExchangeStatus.COMPLETE && it.myItem.id == itemId }

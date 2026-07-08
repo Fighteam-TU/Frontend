@@ -1,11 +1,15 @@
 package com.fighteam.wannawear.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -696,7 +700,7 @@ private fun ModificationRequestDialog(
         onDismissRequest = onDismiss,
         title = { Text("교환 수정 요청", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
         text = {
-            Column(Modifier.heightIn(max = 420.dp)) {
+            Column(Modifier.heightIn(max = 460.dp)) {
                 Text(
                     "받고 싶은 옷과 내가 제시할 옷을 둘 다 고를 수 있어요. 제시하는 쪽은 실제로 정해지는 건 아니고, ${room.partner.name}님이 다시 고를 때 참고할 제안이에요.",
                     color = TextSecondary, fontSize = 12.sp
@@ -704,24 +708,29 @@ private fun ModificationRequestDialog(
                 Spacer(Modifier.height(12.dp))
 
                 Text("${room.partner.name}님에게서 받고 싶은 옷", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                CandidateCheckList(
+                Spacer(Modifier.height(6.dp))
+                SelectableCandidateGrid(
                     candidates = mergedWantCandidates,
                     selectedIds = wantSelectedIds,
                     onToggle = { id, checked -> wantSelectedIds = if (checked) wantSelectedIds + id else wantSelectedIds - id },
                     emptyText = "아직 좋아요한 상대 옷이 없어서 고를 수 있는 옷이 없어요.",
-                    maxHeight = 150.dp
+                    maxHeight = 160.dp
                 )
 
-                Spacer(Modifier.height(14.dp))
-                Text("내가 교환으로 제시하는 옷 (제안)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(4.dp))
-                CandidateCheckList(
+                Spacer(Modifier.height(16.dp))
+                Text("내가 교환으로 제시하는 옷", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "체크한 옷은 강제로 정해지는 게 아니라, ${room.partner.name}님이 다시 고를 때 \"상대방이 권유한 거래 옷\"으로 표시돼요.",
+                    color = TextTertiary, fontSize = 10.sp
+                )
+                Spacer(Modifier.height(6.dp))
+                SelectableCandidateGrid(
                     candidates = mergedOfferCandidates,
                     selectedIds = offerSelectedIds,
                     onToggle = { id, checked -> offerSelectedIds = if (checked) offerSelectedIds + id else offerSelectedIds - id },
                     emptyText = "상대가 좋아요한 내 옷이 아직 없어서 제안할 옷이 없어요.",
-                    maxHeight = 150.dp
+                    maxHeight = 160.dp
                 )
             }
         },
@@ -748,8 +757,10 @@ private fun ModificationRequestDialog(
     )
 }
 
+// ✅ 2026-07-08: 체크박스 대신 다른 서비스들(쇼핑앱 옵션 선택 등)에서 흔한 "카드 테두리 강조 +
+// 체크 배지" 방식으로 통일 — MatchRoomSelectionScreen의 SelectableCandidateCard와 같은 톤.
 @Composable
-private fun CandidateCheckList(
+private fun SelectableCandidateGrid(
     candidates: List<ClothingItem>?,
     selectedIds: Set<Int>,
     onToggle: (Int, Boolean) -> Unit,
@@ -761,23 +772,39 @@ private fun CandidateCheckList(
             CircularProgressIndicator(color = AccentYellow, modifier = Modifier.size(18.dp))
         }
         candidates.isEmpty() -> Text(emptyText, color = TextTertiary, fontSize = 12.sp)
-        else -> Column(Modifier.heightIn(max = maxHeight)) {
-            candidates.forEach { item ->
-                val checked = item.id in selectedIds
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clickable { onToggle(item.id, !checked) }
-                        .padding(vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically
+        else -> LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.heightIn(max = maxHeight),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            gridItems(candidates, key = { it.id }) { item ->
+                val selected = item.id in selectedIds
+                Column(
+                    Modifier.clip(RoundedCornerShape(10.dp)).clickable { onToggle(item.id, !selected) },
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Checkbox(
-                        checked = checked,
-                        onCheckedChange = { onToggle(item.id, it) },
-                        colors = CheckboxDefaults.colors(checkedColor = AccentYellow)
-                    )
-                    AsyncImage(item.image, null, modifier = Modifier.size(32.dp).clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
-                    Spacer(Modifier.width(8.dp))
-                    Text(item.name, color = TextPrimary, fontSize = 12.sp, maxLines = 1)
+                    Box(
+                        Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp))
+                            .border(
+                                if (selected) 2.5.dp else 0.dp,
+                                if (selected) AccentYellow else Color.Transparent,
+                                RoundedCornerShape(10.dp)
+                            )
+                    ) {
+                        AsyncImage(item.image, null, modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                        if (selected) {
+                            Box(
+                                Modifier.align(Alignment.TopEnd).padding(3.dp).size(18.dp)
+                                    .background(AccentYellow, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = "선택됨", tint = AccentYellowText, modifier = Modifier.size(11.dp))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(3.dp))
+                    Text(item.name, color = TextPrimary, fontSize = 9.sp, maxLines = 1)
                 }
             }
         }
