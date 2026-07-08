@@ -40,7 +40,10 @@ private enum class RoomFilter(val label: String) {
     ALL("전체"), BEFORE_SHIP("배송 전"), SHIPPING("배송중"), COMPLETE("완료"), CANCELLED("취소")
 }
 private fun MatchRoom.matchesFilter(filter: RoomFilter): Boolean = when (filter) {
-    RoomFilter.ALL         -> true
+    // ✅ 요청사항: "전체" 탭은 문자 그대로 전부가 아니라 "완료/취소를 뺀 진행중 전체"를 뜻하게
+    //    바꿈 — 완료되거나 취소된 건은 각자 전용 탭에서만 보고, 기본 화면은 신경 써야 할 것만
+    //    보이게 한다.
+    RoomFilter.ALL         -> status != MatchRoomStatus.COMPLETE && status != MatchRoomStatus.CANCELLED
     RoomFilter.BEFORE_SHIP -> status == MatchRoomStatus.SELECTING || status == MatchRoomStatus.MATCHED || status == MatchRoomStatus.CONFIRMED
     RoomFilter.SHIPPING    -> status == MatchRoomStatus.SHIPPING
     RoomFilter.COMPLETE    -> status == MatchRoomStatus.COMPLETE
