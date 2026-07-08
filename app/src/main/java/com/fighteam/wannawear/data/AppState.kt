@@ -157,14 +157,13 @@ object AppState {
         //    ItemResponse엔 그걸 구분할 필드 자체가 없다. 그래서 내가 아는 매칭 정보(COMPLETE 상태)
         //    기준으로 이미 나간 옷은 옷장에서 걸러낸다 — 안 그러면 완료된 옷이 다시 "교환중"으로
         //    남아있는 것처럼 보이고, 심지어 그 옷으로 또 매칭이 생기는 버그로 이어진다.
-        val completedMyItemIds = matches
-            .filter { it.status == ExchangeStatus.COMPLETE }
-            .map { it.myItem.id }
-            .toSet()
+        // ⚠️ 2026-07-09: 예전엔 matches(Exchange 단일쌍 모델)만 봤는데, N:M 매칭룸에서 완료된
+        //    교환은 여기 안 잡혀서 완료된 옷이 계속 옷장에 남아있는 버그로 이어졌음 —
+        //    isItemCompleted()로 통일(matches + matchRooms 둘 다 확인).
         myCloset.clear()
         myCloset.addAll(
             res.items.map { it.toClothingItem(fallbackUser = myProfile) }
-                .filterNot { it.id in completedMyItemIds }
+                .filterNot { isItemCompleted(it.id) }
         )
     }
 
@@ -1024,7 +1023,11 @@ object AppState {
     // ⚠️ 다른 사용자에게 그 옷이 보이는지/좋아요 가능한지는 서버의 discover 피드 필터링에 달려
     // 있어서 프론트가 직접 못 고침 — 같은 기준(발송 이후부터)으로 서버도 맞춰달라고 backend-
     // 전달사항.md에 요청함.
-    private val inExchangeRoomStatuses = setOf(MatchRoomStatus.SHIPPING, MatchRoomStatus.COMPLETE)
+    // ⚠️ 2026-07-09 버그 수정: COMPLETE(교환 완료)까지 "교환중" 판정에 포함시켜놔서, 완료된
+    // 옷이 계속 "교환중" 배지가 붙은 채로 내 옷장/받은 관심/보낸 관심에 남아있는 버그가 있었음.
+    // COMPLETE는 "교환중"이 아니라 "이미 끝남" — 아래 isItemCompleted 계열로 완전히 걸러내야
+    // 하는 대상이라, 여기서는 SHIPPING만 "교환중"으로 판정한다.
+    private val inExchangeRoomStatuses = setOf(MatchRoomStatus.SHIPPING)
 
     fun isItemInExchange(itemId: Int): Boolean =
         matchRooms.any { room -> room.status in inExchangeRoomStatuses && room.theirWantList.any { it.id == itemId } }
@@ -1035,17 +1038,27 @@ object AppState {
     fun isTheirItemInExchange(itemId: Int): Boolean =
         matchRooms.any { room -> room.status in inExchangeRoomStatuses && room.myWantList.any { it.id == itemId } }
 
+    // ⚠️ 2026-07-09 버그 수정: matches(Exchange 단일쌍 모델) 기준만 보고 있었는데, N:M
+    // 매칭룸에서 완료된 교환은 이 판정에 안 잡혀서 "완료됐는데도 옷장/받은 관심에 계속
+    // 교환중으로 남아있는" 버그로 이어졌음. matchRooms의 COMPLETE 상태도 같이 본다.
+    // isItemCompleted = "내 물건"이 포함된 완료된 교환(옷장/받은관심에서 걸러낼 때 씀).
     fun isItemCompleted(itemId: Int): Boolean =
-        matches.any { it.status == ExchangeStatus.COMPLETE && it.myItem.id == itemId }
+        matches.any { it.status == ExchangeStatus.COMPLETE && it.myItem.id == itemId } ||
+            matchRooms.any { it.status == MatchRoomStatus.COMPLETE && it.theirWantList.any { item -> item.id == itemId } }
 
+    // isTheirItemCompleted = "상대 물건"이 포함된 완료된 교환(보낸관심/옷장모아보기에서 걸러낼 때 씀).
     fun isTheirItemCompleted(itemId: Int): Boolean =
-        matches.any { it.status == ExchangeStatus.COMPLETE && it.theirItem.id == itemId }
+        matches.any { it.status == ExchangeStatus.COMPLETE && it.theirItem.id == itemId } ||
+            matchRooms.any { it.status == MatchRoomStatus.COMPLETE && it.myWantList.any { item -> item.id == itemId } }
 
     /** 옷장 모아보기에서 아이템을 숨길지 판단 — SHIPPING 이상(양쪽 다 배송 시작)이면 숨김.
      *  MATCHED/CONFIRMED까지는 계속 보여줘서(하트 토글 등) 다른 옷도 둘러볼 수 있게 한다. */
     fun isTheirItemShippedOrCompleted(itemId: Int): Boolean =
         matches.any {
             it.theirItem.id == itemId && (it.status == ExchangeStatus.SHIPPING || it.status == ExchangeStatus.COMPLETE)
+        } || matchRooms.any { room ->
+            (room.status == MatchRoomStatus.SHIPPING || room.status == MatchRoomStatus.COMPLETE) &&
+                room.myWantList.any { it.id == itemId }
         }
 
     // ⚠️ 서버가 매칭 성사 후에도 GET /api/likes/received에서 그 항목을 안 지워줌(실측 확인).
@@ -1057,6 +1070,10 @@ object AppState {
         matches.any {
             it.myItem.id == myItemId && it.partner.id == partnerUserId &&
                 (it.status == ExchangeStatus.SHIPPING || it.status == ExchangeStatus.COMPLETE)
+        } || matchRooms.any { room ->
+            room.partner.id == partnerUserId &&
+                (room.status == MatchRoomStatus.SHIPPING || room.status == MatchRoomStatus.COMPLETE) &&
+                room.theirWantList.any { it.id == myItemId }
         }
 
     /** "받은 관심" 카드에 "매칭중" 배지를 보여줄지 판단용 — SHIPPING 이전이면 true.
