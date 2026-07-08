@@ -56,6 +56,7 @@ fun WannaWearNavGraph() {
     LaunchedEffect(sessionExpired) {
         if (sessionExpired) {
             isLoggedIn = false
+            com.fighteam.wannawear.data.remote.ChatSocketManager.disconnectGlobal()
             SessionEvents.consume()
         }
     }

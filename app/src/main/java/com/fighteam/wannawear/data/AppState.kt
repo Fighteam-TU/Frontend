@@ -115,6 +115,9 @@ object AppState {
             // 로그인 전에 FCM 토큰이 먼저 발급됐을 수 있어서, 로그인 성공 시점에 한 번 더 등록 시도
             TokenManager.deviceToken?.let { registerDeviceToken(it) }
             refreshUnreadNotificationCount()
+            // ⚠️ 2026-07-08 추가 — 채팅방을 열 때만 소켓을 연결하던 걸 앱 전역 상시 연결로 바꿔서,
+            // 채팅방 밖에 있어도 exchange_modification_requested 같은 실시간 브로드캐스트를 받게 함.
+            ChatSocketManager.connectGlobal()
             isLoading = false
         }
     }
@@ -1109,6 +1112,7 @@ object AppState {
     // ── 로그아웃 ─────────────────────────────────────────────────────
     fun logout() {
         unregisterDeviceToken()
+        ChatSocketManager.disconnectGlobal()
         scope.launch {
             val refresh = TokenManager.refreshToken
             if (!refresh.isNullOrBlank()) {
