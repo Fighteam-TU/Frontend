@@ -26,6 +26,7 @@ import com.fighteam.wannawear.ui.theme.*
 fun ProfileScreen(
     onNavigateToAddress: () -> Unit = {},
     onNavigateToEditProfile: () -> Unit = {},
+    onNavigateToMatches: () -> Unit = {},
     onLogout: () -> Unit = {}
 ) {
     val me = AppState.myProfile
@@ -187,7 +188,8 @@ fun ProfileScreen(
             listOf(
                 "프로필 수정" to onNavigateToEditProfile,
                 "배송지 관리" to onNavigateToAddress,
-                "교환 내역" to {},
+                // ⚠️ 여기 눌러도 아무 반응 없던 버그 — 매칭 탭(교환 진행/내역이 실제로 다 있는 곳)으로 연결
+                "교환 내역" to onNavigateToMatches,
                 "설정" to {}
             ).forEach { (label, onClick) ->
                 Row(

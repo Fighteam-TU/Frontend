@@ -182,6 +182,13 @@ fun WannaWearNavGraph() {
                 ProfileScreen(
                     onNavigateToAddress = { navController.navigate(Screen.AddressManage.route) },
                     onNavigateToEditProfile = { navController.navigate(Screen.EditProfile.route) },
+                    onNavigateToMatches = {
+                        navController.navigate(Screen.Matches.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState    = true
+                        }
+                    },
                     onLogout = {
                         AppState.logout()
                         isLoggedIn = false
