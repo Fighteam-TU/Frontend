@@ -717,7 +717,7 @@ fun ItemDetailSheet(
                                 Spacer(Modifier.width(6.dp))
                                 Icon(Icons.Default.Star, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(12.dp))
                                 Spacer(Modifier.width(2.dp))
-                                Text(String.format("%.1f", score), color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(String.format(java.util.Locale.US, "%.1f", score), color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         if (item.distance.isNotEmpty()) Text(item.distance, color = TextTertiary, fontSize = 10.sp)
@@ -915,7 +915,7 @@ fun CombinedInterestedClosetDialog(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceAround
                 ) {
-                    ProfileStatCell("매너온도", profile?.mannerScore?.let { String.format("%.1f", it) } ?: "-")
+                    ProfileStatCell("매너온도", profile?.mannerScore?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "-")
                     Box(Modifier.width(1.dp).height(24.dp).background(BorderSubtle).align(Alignment.CenterVertically))
                     ProfileStatCell("교환 횟수", profile?.totalExchanges?.let { "${it}회" } ?: "-")
                     Box(Modifier.width(1.dp).height(24.dp).background(BorderSubtle).align(Alignment.CenterVertically))
