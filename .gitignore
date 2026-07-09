@@ -16,3 +16,9 @@ local.properties
 
 /app/google-services.json
 .test_account.json
+
+# Local per-machine IDE state (causes needless diffs across teammates)
+.idea/deploymentTargetSelector.xml
+
+# Kotlin incremental build error cache (local build artifact)
+.kotlin/
