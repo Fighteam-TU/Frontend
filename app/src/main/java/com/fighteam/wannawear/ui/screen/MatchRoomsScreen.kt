@@ -345,7 +345,7 @@ private fun MatchRoomCard(
                         Spacer(Modifier.width(6.dp))
                         Icon(Icons.Default.Star, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(13.dp))
                         Spacer(Modifier.width(2.dp))
-                        Text(String.format("%.1f", score), color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(String.format(java.util.Locale.US, "%.1f", score), color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 Text(room.date, color = TextSecondary, fontSize = 11.sp)

@@ -118,7 +118,7 @@ fun ProfileScreen(
                         )
                     }
                     Spacer(Modifier.width(4.dp))
-                    Text("매너 온도 ${me?.mannerScore?.let { String.format("%.1f", it) } ?: "-"}",
+                    Text("매너 온도 ${me?.mannerScore?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "-"}",
                         color = TextSecondary, fontSize = 10.sp)
                 }
             }
@@ -168,7 +168,7 @@ fun ProfileScreen(
             Text("🌱", fontSize = 20.sp)
             Spacer(Modifier.width(12.dp))
             Column {
-                Text("탄소 ${String.format("%.1f", carbonSaved)}kg 절감",
+                Text("탄소 ${String.format(java.util.Locale.US, "%.1f", carbonSaved)}kg 절감",
                     color = EcoGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(
                     if (completedCount == 0) "첫 교환으로 지구를 지켜보세요!"

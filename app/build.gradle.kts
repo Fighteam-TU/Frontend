@@ -43,6 +43,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    // InvalidFragmentVersionForActivityResult lint 에러 해결:
+    // 전이 의존성으로 1.3.0 미만 fragment가 딸려 들어와 ActivityResult API와 충돌 가능 → 명시적 버전 고정
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
