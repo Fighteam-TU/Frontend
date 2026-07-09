@@ -21,7 +21,9 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +47,11 @@ fun DiscoverScreen(
     val cards = AppState.discoverCards
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
+
+    // ⚠️ 2026-07-09 UX 개선 — 하단 X/하트 버튼이 카드를 즉시 제거해서 스와이프(플라이오프
+    // 애니메이션)와 체감이 달랐음. 버튼 입력도 최상단 카드에 애니메이션 요청으로 전달해
+    // 제스처와 동일한 경로를 타게 함. true=좋아요, false=패스, null=대기.
+    var buttonSwipe by remember { mutableStateOf<Boolean?>(null) }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -184,6 +191,8 @@ fun DiscoverScreen(
                                         item = item,
                                         stackIndex = stackIdx,
                                         isTop = isTop,
+                                        buttonSwipe = if (isTop) buttonSwipe else null,
+                                        onButtonSwipeConsumed = { buttonSwipe = null },
                                         onSwiped = { isLike ->
                                             val top = cards.firstOrNull() ?: return@SwipeCard
                                             cards.removeAt(0)
@@ -213,13 +222,9 @@ fun DiscoverScreen(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 패스
+                    // 패스 — 즉시 제거하지 않고 최상단 카드에 플라이오프 애니메이션 요청(스와이프와 동일 UX)
                     IconButton(
-                        onClick = {
-                            val top = cards.firstOrNull() ?: return@IconButton
-                            cards.removeAt(0)
-                            AppState.passItem(top.id)
-                        },
+                        onClick = { buttonSwipe = false },
                         modifier = Modifier
                             .size(52.dp)
                             .background(BgCardDark, CircleShape)
@@ -261,15 +266,9 @@ fun DiscoverScreen(
 
                     Spacer(Modifier.width(20.dp))
 
-                    // 좋아요
+                    // 좋아요 — 즉시 제거하지 않고 최상단 카드에 플라이오프 애니메이션 요청(스와이프와 동일 UX)
                     IconButton(
-                        onClick = {
-                            val top = cards.firstOrNull() ?: return@IconButton
-                            cards.removeAt(0)
-                            AppState.likeItem(top) { result ->
-                                if (result is MatchResult.Matched) matchedResult = result.match
-                            }
-                        },
+                        onClick = { buttonSwipe = true },
                         modifier = Modifier
                             .size(52.dp)
                             .background(AccentYellow, CircleShape)
@@ -325,15 +324,42 @@ fun SwipeCard(
     item: ClothingItem,
     stackIndex: Int,
     isTop: Boolean,
+    // 하단 액션 버튼(X/하트)에서 요청한 스와이프. 카드가 소비하면 onButtonSwipeConsumed 호출.
+    buttonSwipe: Boolean? = null,
+    onButtonSwipeConsumed: () -> Unit = {},
     onSwiped: (Boolean) -> Unit
 ) {
     val offsetX = remember { Animatable(0f) }
     var showDetail by remember { mutableStateOf(false) }
     var isLeaving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
     val rotation = offsetX.value / 25f
     val scale = 1f - stackIndex * 0.04f
     val yOffset = (stackIndex * 13).dp
+
+    // 제스처/버튼 공통 플라이오프 — 햅틱 → 화면 밖 애니메이션 → 실제 제거 콜백
+    suspend fun flyOff(isLike: Boolean) {
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        offsetX.animateTo(
+            targetValue = if (isLike) 1500f else -1500f,
+            animationSpec = tween(durationMillis = 220)
+        )
+        onSwiped(isLike)
+    }
+
+    // 하단 X/하트 버튼 입력을 제스처와 동일한 애니메이션 경로로 소비
+    // ⚠️ 버그 수정: onButtonSwipeConsumed()를 flyOff보다 먼저 호출하면 buttonSwipe가 null로
+    // 바뀌는 순간 이 LaunchedEffect의 key가 바뀌어 실행 중이던 애니메이션 코루틴이 그대로
+    // 취소돼버림 → 카드가 isLeaving=true인 채로 멈춰서 이후 버튼/제스처가 전혀 안 먹었음.
+    // flyOff를 먼저 끝까지 완료시키고, 그 다음에 소비 콜백을 호출하도록 순서를 바꿔 해결.
+    LaunchedEffect(buttonSwipe) {
+        if (isTop && buttonSwipe != null && !isLeaving) {
+            isLeaving = true
+            flyOff(buttonSwipe)
+            onButtonSwipeConsumed()
+        }
+    }
 
     Box(
         Modifier
@@ -358,16 +384,11 @@ fun SwipeCard(
                         onDragEnd = {
                             if (isLeaving) return@detectHorizontalDragGestures
                             val current = offsetX.value
-                            if (abs(current) > 250) {
+                            // 250px 고정 임계값은 기기 해상도별로 감도가 제각각 → 카드 너비 30% 비율로 통일
+                            val threshold = size.width * 0.30f
+                            if (abs(current) > threshold) {
                                 isLeaving = true
-                                val isLike = current > 0
-                                scope.launch {
-                                    offsetX.animateTo(
-                                        targetValue = if (isLike) 1500f else -1500f,
-                                        animationSpec = tween(durationMillis = 220)
-                                    )
-                                    onSwiped(isLike)
-                                }
+                                scope.launch { flyOff(current > 0) }
                             } else {
                                 scope.launch {
                                     offsetX.animateTo(
@@ -478,10 +499,15 @@ fun SwipeCard(
                     verticalAlignment = Alignment.Bottom
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(
-                            item.brand.uppercase(), color = OverlayTextTertiary,
-                            fontSize = 10.sp, letterSpacing = 1.5.sp
-                        )
+                        // ⚠️ 2026-07-09 — 브랜드 미입력 아이템에서 서버 기본값 "NONE"이 그대로
+                        // 노출되던 문제. 값이 비었거나 none이면 브랜드 줄 자체를 숨긴다.
+                        val brandText = item.brand.trim()
+                        if (brandText.isNotEmpty() && !brandText.equals("none", ignoreCase = true)) {
+                            Text(
+                                brandText.uppercase(), color = OverlayTextTertiary,
+                                fontSize = 10.sp, letterSpacing = 1.5.sp
+                            )
+                        }
                         Text(
                             item.name, color = OverlayTextPrimary, fontSize = 20.sp,
                             fontWeight = FontWeight.Black
