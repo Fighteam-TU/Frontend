@@ -1,14 +1,18 @@
 package com.fighteam.wannawear.ui.screen
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,131 +34,291 @@ import com.fighteam.wannawear.data.model.ClothingItem
 import com.fighteam.wannawear.data.model.MatchItem
 import com.fighteam.wannawear.ui.theme.*
 import kotlin.math.abs
+import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DiscoverScreen() {
+fun DiscoverScreen(
+    onNavigateToSearch: () -> Unit = {},
+    onNavigateToNotifications: () -> Unit = {}
+) {
     val cards = AppState.discoverCards
     var matchedResult by remember { mutableStateOf<MatchItem?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
 
-    Box(Modifier.fillMaxSize().background(BgPrimary)) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    // 최초 진입 시 발견 덱이 비어있으면 한 번 더 로드 시도 + 알림 뱃지 최신화
+    LaunchedEffect(Unit) {
+        if (cards.isEmpty() && !AppState.isLoading) {
+            AppState.refreshDiscoverFeed()
+        }
+        AppState.refreshUnreadNotificationCount()
+    }
+
+    Box(Modifier
+        .fillMaxSize()
+        .background(BgPrimary)) {
         Column(Modifier.fillMaxSize()) {
 
-            // 헤더
+            // ── 헤더 ─────────────────────────────────────────────────
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("WannaWear", color = TextPrimary, fontSize = 28.sp,
-                        fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic)
+                    Text(
+                        "WannaWear", color = TextPrimary, fontSize = 28.sp,
+                        fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic
+                    )
                     Text("서울 · ${cards.size}개 아이템", color = TextSecondary, fontSize = 10.sp)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(onClick = {}, modifier = Modifier.size(36.dp)
-                        .background(BgCard, CircleShape)) {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                // ⚠️ 2026-07-09 디자인 업그레이드: 아이콘마다 하얀 원 배경을 감싸는 스타일이
+                // "예뻐 보이지 않는다"는 피드백 — 배경 없이 아이콘만 노출하는 미니멀한 방식으로
+                // 변경(Linear/Arc 같은 정제된 툴바 참고). 터치 영역은 IconButton 기본 48dp로
+                // 유지하고, 아이콘 자체를 좀 더 크고 진하게(TextPrimary)해서 존재감은 유지.
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    IconButton(onClick = onNavigateToSearch, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            Icons.Default.Search, contentDescription = "검색",
+                            tint = TextPrimary, modifier = Modifier.size(21.dp)
+                        )
                     }
-                    IconButton(onClick = {}, modifier = Modifier.size(36.dp)
-                        .background(BgCard, CircleShape)) {
-                        Icon(Icons.Default.Settings, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-
-            // 카드 스택
-            Box(
-                Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (cards.isEmpty()) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("🌿", fontSize = 36.sp)
-                        Text("주변 아이템을 모두 봤어요", color = TextPrimary, fontWeight = FontWeight.Bold)
-                        Text("새 아이템이 곧 올라와요", color = TextSecondary, fontSize = 14.sp)
-                        Button(
-                            onClick = {
-                                AppState.discoverCards.clear()
-                                AppState.discoverCards.addAll(com.fighteam.wannawear.data.model.DummyData.discoverItems)
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText),
-                            shape = RoundedCornerShape(12.dp)
+                    Box {
+                        IconButton(
+                            onClick = onNavigateToNotifications,
+                            modifier = Modifier.size(40.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("다시 보기", fontWeight = FontWeight.Bold)
+                            Icon(
+                                Icons.Default.Notifications, contentDescription = "알림",
+                                tint = TextPrimary, modifier = Modifier.size(21.dp)
+                            )
+                        }
+                        if (AppState.unreadNotificationCount > 0) {
+                            Box(
+                                Modifier
+                                    .size(8.dp)
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (-6).dp, y = 6.dp)
+                                    .background(PassColor, CircleShape)
+                            )
                         }
                     }
-                } else {
-                    cards.take(3).reversed().forEachIndexed { revIdx, item ->
-                        val stackIdx = 2 - revIdx
-                        val isTop = stackIdx == 0
-                        SwipeCard(
-                            item = item,
-                            stackIndex = stackIdx,
-                            isTop = isTop,
-                            onSwiped = { isLike ->
-                                val top = cards.firstOrNull() ?: return@SwipeCard
-                                cards.removeAt(0)
-                                if (isLike) {
-                                    val result = AppState.likeItem(top)
-                                    if (result is MatchResult.Matched) {
-                                        matchedResult = result.match
-                                    }
-                                }
-                            }
+                    IconButton(onClick = {}, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            Icons.Default.Settings, contentDescription = null,
+                            tint = TextPrimary, modifier = Modifier.size(21.dp)
                         )
                     }
                 }
             }
 
-            // 액션 버튼 행
+            // ── 카드 스택 ─────────────────────────────────────────────
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = {
+                        scope.launch {
+                            isRefreshing = true
+                            runCatching { AppState.loadDiscoverFeed() }
+                            isRefreshing = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        if (AppState.isLoading && cards.isEmpty()) {
+                            CircularProgressIndicator(color = AccentYellow)
+                        } else if (cards.isEmpty()) {
+                            // 빈 상태 — 새 아이템 보기 버튼
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text("🌿", fontSize = 36.sp)
+                                Text(
+                                    "주변 아이템을 모두 봤어요", color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "좋아요 안 한 다른 옷들을 보여드릴게요",
+                                    color = TextSecondary, fontSize = 13.sp
+                                )
+                                Button(
+                                    onClick = {
+                                        scope.launch { AppState.refreshDiscoverFeed() }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = AccentYellow,
+                                        contentColor = AccentYellowText
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.AutoAwesome, contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("새 아이템 보기", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            // ✅ 고정 3장 기준(2 - revIdx) 대신 실제 표시 개수 기준으로 stackIdx 계산.
+                            //    덱이 3장 미만으로 줄어도(마지막 1~2장) top 카드가 정확히 지정되어 스와이프가 계속 먹는다.
+                            val visible = cards.take(3)
+                            visible.reversed().forEachIndexed { revIdx, item ->
+                                val stackIdx = (visible.size - 1) - revIdx
+                                val isTop = stackIdx == 0
+                                key(item.id) {
+                                    SwipeCard(
+                                        item = item,
+                                        stackIndex = stackIdx,
+                                        isTop = isTop,
+                                        onSwiped = { isLike ->
+                                            val top = cards.firstOrNull() ?: return@SwipeCard
+                                            cards.removeAt(0)
+                                            if (isLike) {
+                                                AppState.likeItem(top) { result ->
+                                                    if (result is MatchResult.Matched) matchedResult =
+                                                        result.match
+                                                }
+                                            } else {
+                                                AppState.passItem(top.id)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 액션 버튼 ─────────────────────────────────────────────
             if (cards.isNotEmpty()) {
                 Row(
-                    Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = { if (cards.isNotEmpty()) cards.removeAt(0) },
-                        modifier = Modifier.size(52.dp).background(BgCardDark, CircleShape)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "패스", tint = TextSecondary, modifier = Modifier.size(22.dp))
-                    }
-                    Spacer(Modifier.width(20.dp))
-                    IconButton(onClick = {
-                        AppState.discoverCards.clear()
-                        AppState.discoverCards.addAll(com.fighteam.wannawear.data.model.DummyData.discoverItems)
-                    }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "되돌리기", tint = TextTertiary, modifier = Modifier.size(16.dp))
-                    }
-                    Spacer(Modifier.width(20.dp))
+                    // 패스
                     IconButton(
                         onClick = {
                             val top = cards.firstOrNull() ?: return@IconButton
                             cards.removeAt(0)
-                            val result = AppState.likeItem(top)
-                            if (result is MatchResult.Matched) {
-                                matchedResult = result.match
+                            AppState.passItem(top.id)
+                        },
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(BgCardDark, CircleShape)
+                    ) {
+                        Icon(
+                            Icons.Default.Close, contentDescription = "패스",
+                            tint = TextSecondary, modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(20.dp))
+
+                    // 새 아이템 보기
+                    IconButton(onClick = {
+                        scope.launch {
+                            val beforeIds = cards.map { it.id }.toSet()
+                            runCatching { AppState.loadDiscoverFeed() }
+                            val afterIds = cards.map { it.id }.toSet()
+                            // ⚠️ 버그 수정: 예전엔 결과가 실제로 바뀌었는지 상관없이 항상 "불러왔어요"
+                            // 라고 떴음. 근데 발견 탭은 "내가 스와이프한 것"만 제외해주기 때문에,
+                            // 지금 덱에 안 넘긴 카드가 남아있으면 다시 불러와도 똑같은 목록이 옴
+                            // (실측 확인함) — 그럴 땐 정직하게 안내한다.
+                            val message = if (beforeIds.isNotEmpty() && beforeIds == afterIds) {
+                                "지금 카드를 먼저 넘겨야 새 아이템이 나와요"
+                            } else {
+                                "새 아이템을 불러왔어요 ✨"
+                            }
+                            snackbarHostState.showSnackbar(
+                                message = message,
+                                duration = SnackbarDuration.Short
+                            )
+                        }
+                    }) {
+                        Icon(
+                            Icons.Default.AutoAwesome, contentDescription = "새 아이템",
+                            tint = TextTertiary, modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.width(20.dp))
+
+                    // 좋아요
+                    IconButton(
+                        onClick = {
+                            val top = cards.firstOrNull() ?: return@IconButton
+                            cards.removeAt(0)
+                            AppState.likeItem(top) { result ->
+                                if (result is MatchResult.Matched) matchedResult = result.match
                             }
                         },
-                        modifier = Modifier.size(52.dp).background(AccentYellow, CircleShape)
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(AccentYellow, CircleShape)
                     ) {
-                        Icon(Icons.Default.Favorite, contentDescription = "좋아요", tint = AccentYellowText, modifier = Modifier.size(22.dp))
+                        Icon(
+                            Icons.Default.Favorite, contentDescription = "좋아요",
+                            tint = AccentYellowText, modifier = Modifier.size(22.dp)
+                        )
                     }
                 }
             }
         }
 
-        // 매치 팝업 (실제 교환 성사 시에만)
+        // ── 스낵바 ────────────────────────────────────────────────────
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 80.dp)
+        ) { data ->
+            Snackbar(
+                snackbarData = data,
+                containerColor = BgCard,
+                contentColor = TextPrimary,
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
+
+        // ── 매치 팝업 ─────────────────────────────────────────────────
         matchedResult?.let { match ->
-            RealMatchPopup(match = match, onClose = { matchedResult = null })
+            RealMatchPopup(
+                match = match,
+                onClose = {
+                    matchedResult = null
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = "매칭 내역은 매칭 탭에서 확인하세요 💛",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                }
+            )
         }
     }
 }
 
-// ── 카드 상세 시트 (실착 샷 / 사이즈 정보) ──────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// SwipeCard
+// ─────────────────────────────────────────────────────────────────────
 
 @Composable
 fun SwipeCard(
@@ -163,9 +327,11 @@ fun SwipeCard(
     isTop: Boolean,
     onSwiped: (Boolean) -> Unit
 ) {
-    var offsetX by remember { mutableStateOf(0f) }
+    val offsetX = remember { Animatable(0f) }
     var showDetail by remember { mutableStateOf(false) }
-    val rotation by animateFloatAsState(targetValue = offsetX / 25f, label = "rotate")
+    var isLeaving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val rotation = offsetX.value / 25f
     val scale = 1f - stackIndex * 0.04f
     val yOffset = (stackIndex * 13).dp
 
@@ -175,18 +341,51 @@ fun SwipeCard(
             .graphicsLayer {
                 scaleX = scale; scaleY = scale
                 translationY = yOffset.toPx()
-                translationX = if (isTop) offsetX else 0f
+                translationX = if (isTop) offsetX.value else 0f
                 rotationZ = if (isTop) rotation else 0f
             }
             .clip(RoundedCornerShape(26.dp))
             .background(BgCard)
             .then(
-                if (isTop) Modifier.pointerInput(Unit) {
-                    detectDragGestures(
-                        onDrag = { _, drag -> offsetX += drag.x },
+                if (isTop) Modifier.pointerInput(item.id) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            if (!isLeaving) {
+                                change.consume()
+                                scope.launch { offsetX.snapTo(offsetX.value + dragAmount) }
+                            }
+                        },
                         onDragEnd = {
-                            if (abs(offsetX) > 250) onSwiped(offsetX > 0)
-                            else offsetX = 0f
+                            if (isLeaving) return@detectHorizontalDragGestures
+                            val current = offsetX.value
+                            if (abs(current) > 250) {
+                                isLeaving = true
+                                val isLike = current > 0
+                                scope.launch {
+                                    offsetX.animateTo(
+                                        targetValue = if (isLike) 1500f else -1500f,
+                                        animationSpec = tween(durationMillis = 220)
+                                    )
+                                    onSwiped(isLike)
+                                }
+                            } else {
+                                scope.launch {
+                                    offsetX.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                                    )
+                                }
+                            }
+                        },
+                        onDragCancel = {
+                            if (!isLeaving) {
+                                scope.launch {
+                                    offsetX.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+                                    )
+                                }
+                            }
                         }
                     )
                 } else Modifier
@@ -200,89 +399,168 @@ fun SwipeCard(
         )
 
         // LIKE / NOPE 스탬프
-        if (isTop && offsetX > 30f) {
-            Text("LIKE", color = AccentYellow, fontSize = 52.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.padding(20.dp).rotate(-14f).graphicsLayer { alpha = (offsetX / 200f).coerceIn(0f, 1f) })
+        if (isTop && offsetX.value > 30f) {
+            Text(
+                "LIKE", color = AccentYellow, fontSize = 52.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .padding(20.dp)
+                    .rotate(-14f)
+                    .graphicsLayer { alpha = (offsetX.value / 200f).coerceIn(0f, 1f) })
         }
-        if (isTop && offsetX < -30f) {
-            Text("NOPE", color = PassColor, fontSize = 52.sp, fontWeight = FontWeight.Black,
-                modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).rotate(14f)
-                    .graphicsLayer { alpha = (-offsetX / 200f).coerceIn(0f, 1f) })
+        if (isTop && offsetX.value < -30f) {
+            Text(
+                "NOPE", color = PassColor, fontSize = 52.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(20.dp)
+                    .rotate(14f)
+                    .graphicsLayer { alpha = (-offsetX.value / 200f).coerceIn(0f, 1f) })
         }
 
-        // 상단 유저 / 거리 칩
+        // 유저 / 거리 칩
         Row(
-            Modifier.fillMaxWidth().padding(16.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
-                Modifier.background(Color(0x80000000), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 6.dp),
+                Modifier
+                    .background(Color(0x80000000), RoundedCornerShape(50))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AsyncImage(item.user.avatar, null, modifier = Modifier.size(20.dp).clip(CircleShape))
+                AsyncImage(
+                    item.user.avatar, null,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                )
                 Spacer(Modifier.width(6.dp))
-                Text(item.user.name, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    item.user.name, color = OverlayTextPrimary, fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-            Text(item.distance, color = TextSecondary, fontSize = 11.sp,
-                modifier = Modifier.background(Color(0x80000000), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 6.dp))
+            if (item.distance.isNotEmpty()) {
+                Text(
+                    item.distance, color = OverlayTextSecondary, fontSize = 11.sp,
+                    modifier = Modifier
+                        .background(Color(0x80000000), RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
         }
 
         // 하단 정보
+        // ⚠️ 2026-07-09 — 이름은 잘 보이지만 브랜드/태그/사이즈 같은 부가정보는 여전히 흐릿
+        // 하다는 피드백. 원인은 그라디언트가 위쪽일수록 옅어지는데, 부가정보 텍스트들이 이
+        // Column 상단 쪽(=그라디언트가 아직 옅은 구간)에 몰려 있어서였음 — 중간 스탑을 추가해
+        // 텍스트 블록 전체 구간이 확실히 어둡게 깔리도록 강화.
         Box(
-            Modifier.fillMaxWidth().align(Alignment.BottomStart)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEB000000))))
+            Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.Transparent,
+                            Color(0xB3000000),
+                            Color(0xF7000000)
+                        )
+                    )
+                )
         ) {
             Column(Modifier.padding(20.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
                     Column(Modifier.weight(1f)) {
-                        Text(item.brand.uppercase(), color = Color(0x73FFFFFF), fontSize = 10.sp, letterSpacing = 1.5.sp)
-                        Text(item.name, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        Text(
+                            item.brand.uppercase(), color = OverlayTextTertiary,
+                            fontSize = 10.sp, letterSpacing = 1.5.sp
+                        )
+                        Text(
+                            item.name, color = OverlayTextPrimary, fontSize = 20.sp,
+                            fontWeight = FontWeight.Black
+                        )
                     }
-                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(item.condition, color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.background(Color(0x2EE4D94A), RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp))
-                        // 사이즈 + 키
-                        Text("${item.size}  ${item.heightFit}", color = Color(0x80FFFFFF), fontSize = 10.sp)
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            item.condition, color = OverlayTextPrimary, fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(
+                                    AccentYellow.copy(alpha = 0.55f),
+                                    RoundedCornerShape(50)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                        Text(
+                            "${item.size}  ${item.heightFit}",
+                            color = OverlayTextSecondary, fontSize = 10.sp
+                        )
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     item.tags.forEach { tag ->
-                        Text("#$tag", color = Color(0x8CFFFFFF), fontSize = 10.sp,
-                            modifier = Modifier.background(Color(0x1AFFFFFF), RoundedCornerShape(50)).padding(horizontal = 8.dp, vertical = 3.dp))
+                        Text(
+                            "#$tag", color = OverlayTextPrimary, fontSize = 10.sp,
+                            modifier = Modifier
+                                .background(
+                                    Color(0x40FFFFFF),
+                                    RoundedCornerShape(50)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
                     }
                 }
 
-                // 상세 토글 버튼 (실착 샷 / 하자 설명 보기)
+                // 자세히 보기 토글
                 if (isTop && (item.wearingImage.isNotEmpty() || item.description.isNotEmpty())) {
                     Spacer(Modifier.height(8.dp))
                     TextButton(
                         onClick = { showDetail = !showDetail },
                         contentPadding = PaddingValues(0.dp)
                     ) {
-                        Text(if (showDetail) "간단히 보기 ↑" else "자세히 보기 ↓",
-                            color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (showDetail) "간단히 보기 ↑" else "자세히 보기 ↓",
+                            color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
-                // 펼쳐지는 상세 영역
                 if (showDetail && isTop) {
                     Spacer(Modifier.height(6.dp))
-                    // 하자 설명
                     if (item.description.isNotEmpty()) {
-                        Text("📝 ${item.description}", color = Color(0xCCFFFFFF), fontSize = 11.sp,
-                            modifier = Modifier.background(Color(0x1AFFFFFF), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 6.dp))
+                        Text(
+                            "📝 ${item.description}", color = OverlayTextPrimary, fontSize = 11.sp,
+                            modifier = Modifier
+                                .background(
+                                    Color(0x40FFFFFF),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
                     }
-                    // 실착 샷
                     if (item.wearingImage.isNotEmpty()) {
                         Spacer(Modifier.height(6.dp))
-                        Text("실착 샷", color = TextSecondary, fontSize = 10.sp)
+                        Text("실착 샷", color = OverlayTextSecondary, fontSize = 10.sp)
                         Spacer(Modifier.height(4.dp))
                         AsyncImage(
                             model = item.wearingImage,
                             contentDescription = "실착 샷",
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxWidth().height(140.dp).clip(RoundedCornerShape(12.dp))
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp)
+                                .clip(RoundedCornerShape(12.dp))
                         )
                     }
                 }
@@ -291,39 +569,90 @@ fun SwipeCard(
     }
 }
 
-// ── 실제 매치 팝업 ──────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────
+// RealMatchPopup
+// ─────────────────────────────────────────────────────────────────────
 
 @Composable
 fun RealMatchPopup(match: MatchItem, onClose: () -> Unit) {
-    Box(Modifier.fillMaxSize().background(BgPrimary)) {
-        Column(Modifier.fillMaxSize().padding(24.dp)) {
+    Box(Modifier
+        .fillMaxSize()
+        .background(BgPrimary)) {
+        Column(Modifier
+            .fillMaxSize()
+            .padding(24.dp)) {
             Spacer(Modifier.height(48.dp))
-            Text("서로 좋아요를 눌렀어요! 🎉", color = AccentYellow, fontSize = 11.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            Text(
+                "서로 좋아요를 눌렀어요! 🎉", color = AccentYellow, fontSize = 11.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 2.sp
+            )
             Text("MATCH", color = TextPrimary, fontSize = 64.sp, fontWeight = FontWeight.Black)
             Spacer(Modifier.height(8.dp))
-            Text("${match.partner.name}님과 교환을 시작할 수 있어요",
-                color = TextSecondary, fontSize = 13.sp)
+            Text(
+                "${match.partner.name}님과 교환을 시작할 수 있어요",
+                color = TextSecondary, fontSize = 13.sp
+            )
             Spacer(Modifier.height(16.dp))
 
-            Row(Modifier.fillMaxWidth().height(240.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp))) {
-                    AsyncImage(match.myItem.image, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))) {
-                        Column(Modifier.padding(12.dp).align(Alignment.BottomStart)) {
-                            Text(match.myItem.name, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text("내 옷", color = Color(0x66FFFFFF), fontSize = 10.sp)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(240.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(16.dp))) {
+                    AsyncImage(
+                        match.myItem.image, null,
+                        contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))
+                            )
+                    ) {
+                        Column(Modifier
+                            .padding(12.dp)
+                            .align(Alignment.BottomStart)) {
+                            Text(
+                                match.myItem.name, color = OverlayTextPrimary, fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text("내 옷", color = OverlayTextTertiary, fontSize = 10.sp)
                         }
                     }
                 }
-                Text("×", color = TextTertiary, fontSize = 24.sp, fontWeight = FontWeight.Black,
-                    modifier = Modifier.align(Alignment.CenterVertically))
-                Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp))) {
-                    AsyncImage(match.theirItem.image, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))) {
-                        Column(Modifier.padding(12.dp).align(Alignment.BottomStart)) {
-                            Text(match.theirItem.name, color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            Text(match.partner.name, color = Color(0x66FFFFFF), fontSize = 10.sp)
+                Text(
+                    "×", color = TextTertiary, fontSize = 24.sp, fontWeight = FontWeight.Black,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
+                Box(Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(16.dp))) {
+                    AsyncImage(
+                        match.theirItem.image, null,
+                        contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))
+                            )
+                    ) {
+                        Column(Modifier
+                            .padding(12.dp)
+                            .align(Alignment.BottomStart)) {
+                            Text(
+                                match.theirItem.name, color = OverlayTextPrimary, fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(match.partner.name, color = OverlayTextTertiary, fontSize = 10.sp)
                         }
                     }
                 }
@@ -331,21 +660,35 @@ fun RealMatchPopup(match: MatchItem, onClose: () -> Unit) {
 
             Spacer(Modifier.height(16.dp))
 
-            // 사이즈 비교
             Row(
-                Modifier.fillMaxWidth().background(BgCard, RoundedCornerShape(12.dp)).padding(14.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .background(BgCard, RoundedCornerShape(12.dp))
+                    .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("내 옷 사이즈", color = TextSecondary, fontSize = 10.sp)
-                    Text(match.myItem.size, color = AccentYellow, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    Text(
+                        match.myItem.size, color = AccentYellow, fontSize = 16.sp,
+                        fontWeight = FontWeight.Black
+                    )
                     if (match.myItem.heightFit.isNotEmpty())
                         Text(match.myItem.heightFit, color = TextSecondary, fontSize = 9.sp)
                 }
-                Box(Modifier.width(1.dp).height(40.dp).background(BorderSubtle).align(Alignment.CenterVertically))
+                Box(
+                    Modifier
+                        .width(1.dp)
+                        .height(40.dp)
+                        .background(BorderSubtle)
+                        .align(Alignment.CenterVertically)
+                )
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("상대 옷 사이즈", color = TextSecondary, fontSize = 10.sp)
-                    Text(match.theirItem.size, color = AccentYellow, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                    Text(
+                        match.theirItem.size, color = AccentYellow, fontSize = 16.sp,
+                        fontWeight = FontWeight.Black
+                    )
                     if (match.theirItem.heightFit.isNotEmpty())
                         Text(match.theirItem.heightFit, color = TextSecondary, fontSize = 9.sp)
                 }
@@ -353,12 +696,20 @@ fun RealMatchPopup(match: MatchItem, onClose: () -> Unit) {
 
             Spacer(Modifier.weight(1f))
 
-            Button(onClick = {
-                AppState.confirmExchange(match.id)
-                onClose()
-            }, modifier = Modifier.fillMaxWidth().height(56.dp),
+            Button(
+                onClick = {
+                    AppState.confirmExchange(match.id)
+                    onClose()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentYellow, contentColor = AccentYellowText)) {
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AccentYellow,
+                    contentColor = AccentYellowText
+                )
+            ) {
                 Text("교환 확정하기", fontWeight = FontWeight.Black, fontSize = 15.sp)
             }
             Spacer(Modifier.height(8.dp))

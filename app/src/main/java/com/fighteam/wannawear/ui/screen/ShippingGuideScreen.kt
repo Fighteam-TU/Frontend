@@ -3,6 +3,8 @@ package com.fighteam.wannawear.ui.screen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,15 +28,48 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.launch
 
+/**
+ * ⚠️ 2026-07-09 수정: 예전엔 1:1 Exchange(MatchItem) 전용이었는데, N:M 매칭룸(MatchRoom) 도입
+ * 이후 매칭 탭의 "발송 완료" 버튼이 이 화면을 안 거치고 곧장 AppState.shipMatchRoom()을 호출해서
+ * — 사용자가 예전에 봤던 주소 확인/배송 안내 화면이 통째로 안 보이게 됐던 버그. ChatScreen과
+ * 같은 패턴으로 두 모델(MatchItem/MatchRoom)을 다 지원하도록 확장.
+ */
 @Composable
 fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
     val match = AppState.matches.firstOrNull { it.id == matchId }
-        ?: run { onBack(); return }
+    val room  = if (match == null) AppState.matchRooms.firstOrNull { it.id == matchId } else null
+    if (match == null && room == null) { onBack(); return }
 
     val clipboard = LocalClipboardManager.current
     var copiedAddress  by remember { mutableStateOf(false) }
-    var shippingStarted by remember { mutableStateOf(false) }
+    // ⚠️ 2026-07-09 추가 — 이 앱은 매칭/배송 쪽에 실시간 소켓이 없어서, 상대방이 방금 배송지를
+    // 확정해도 이 화면에 자동으로 반영되지 않는다(뒤로 나갔다 매칭 탭에서 새로고침한 뒤 다시
+    // 들어와야만 보임). 매번 그렇게 왔다갔다 하지 않아도 되도록 화면 안에 새로고침 버튼을 둔다.
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // ⚠️ 버그 수정: 예전엔 "전체 status == SHIPPING"만 봤는데, SHIPPING은 양쪽 다 발송해야 바뀜.
+    //    그래서 내가 분명히 발송 버튼을 눌러 myShipped=true가 됐어도, 상대가 아직 안 눌렀으면
+    //    status가 그대로 CONFIRMED라 버튼이 안 바뀌고 "눌러도 안 먹히는" 것처럼 보였음.
+    //    내가 발송했는지(myShipped)만 보고 판단하도록 수정.
+    val currentMatch by remember { derivedStateOf { AppState.matches.firstOrNull { it.id == matchId } } }
+    val currentRoom  by remember { derivedStateOf { AppState.matchRooms.firstOrNull { it.id == matchId } } }
+    val myShipped      = currentMatch?.myShipped == true || currentRoom?.myShipped == true
+    val partnerShipped = currentMatch?.theirShipped == true || currentRoom?.theirShipped == true
+    // ⚠️ 2026-07-09 버그 수정: 상대방이 먼저 배송지를 확정하면 partnerAddress가 서버에서 이미
+    // 내려오는데(위 partnerAddress 주석 참고), 예전엔 이 화면 자체를 "내가 배송지를 확정해서
+    // status가 CONFIRMED가 된 경우"에만 들어올 수 있게 해놔서 — 내가 아직 확정 전이면 상대방
+    // 주소가 이미 준비돼 있어도 볼 방법이 아예 없었음(실제로 발송하려면 주소를 알아야 하는데도).
+    // 호출부(MatchRoomsScreen/MatchesScreen)에서 상대방이 확정했으면 내가 확정 전이어도 이
+    // 화면에 들어올 수 있게 바꿨고, 여기서는 "발송 완료" 액션만 내 확정이 끝난 뒤로 막아준다
+    // (그 전에 발송 처리를 하면 서버가 상태 오류를 준다).
+    val myAddressConfirmed = currentMatch?.myConfirmed == true || currentRoom?.myConfirmed == true
+    val partnerName    = match?.partner?.name ?: room!!.partner.name
+    val partnerAddress = match?.partnerAddress ?: room?.partnerAddress
+    // 1:1이면 아이템 하나씩, 매칭룸이면 N개씩 — 요약 행에서 둘 다 처리
+    val myItems    = match?.let { listOf(it.myItem) } ?: room!!.theirWantList // 내가 보낼(상대가 받을) 옷
+    val theirItems = match?.let { listOf(it.theirItem) } ?: room!!.myWantList // 내가 받을(상대가 보낼) 옷
 
     Column(Modifier.fillMaxSize().background(BgPrimary)) {
 
@@ -49,6 +84,22 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
             }
             Text("배송 안내", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black,
                 modifier = Modifier.weight(1f).padding(start = 4.dp))
+            IconButton(
+                enabled = !isRefreshing,
+                onClick = {
+                    scope.launch {
+                        isRefreshing = true
+                        runCatching { if (match != null) AppState.loadExchanges() else AppState.loadMatchRooms() }
+                        isRefreshing = false
+                    }
+                }
+            ) {
+                if (isRefreshing) {
+                    CircularProgressIndicator(color = AccentYellow, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = TextPrimary)
+                }
+            }
         }
 
         Column(
@@ -56,24 +107,22 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
         ) {
             Spacer(Modifier.height(16.dp))
 
-            // 교환 아이템 요약
+            // 교환 아이템 요약 — 매칭룸은 여러 개일 수 있어서 가로 스크롤로
             Row(
                 Modifier.fillMaxWidth()
                     .background(BgCard, RoundedCornerShape(16.dp))
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AsyncImage(match.myItem.image, null,
-                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                ItemThumbRow(myItems, Modifier.weight(1f))
                 Column(
-                    Modifier.weight(1f).padding(horizontal = 10.dp),
+                    Modifier.padding(horizontal = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("⇄", color = AccentYellow, fontSize = 20.sp, fontWeight = FontWeight.Black)
                     Text("교환", color = TextSecondary, fontSize = 9.sp)
                 }
-                AsyncImage(match.theirItem.image, null,
-                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                ItemThumbRow(theirItems, Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(20.dp))
@@ -118,15 +167,22 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text("수취인 주소", color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text(match.partnerAddress, color = TextPrimary, fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold, lineHeight = 20.sp)
+                    Text(
+                        partnerAddress ?: "상대방이 확정하면 주소가 표시돼요",
+                        color = if (partnerAddress != null) TextPrimary else TextTertiary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold, lineHeight = 20.sp
+                    )
                     Spacer(Modifier.height(2.dp))
-                    Text("수취인: ${match.partner.name}", color = TextSecondary, fontSize = 11.sp)
+                    Text("수취인: ${partnerName}", color = TextSecondary, fontSize = 11.sp)
                 }
-                IconButton(onClick = {
-                    clipboard.setText(AnnotatedString(match.partnerAddress))
-                    copiedAddress = true
-                }) {
+                IconButton(
+                    enabled = partnerAddress != null,
+                    onClick = {
+                        partnerAddress?.let { clipboard.setText(AnnotatedString(it)) }
+                        copiedAddress = true
+                    }
+                ) {
                     Icon(
                         if (copiedAddress) Icons.Default.Check else Icons.Default.ContentCopy,
                         contentDescription = "주소 복사",
@@ -171,12 +227,26 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
 
             Spacer(Modifier.height(28.dp))
 
-            // 배송 완료 버튼
-            if (!shippingStarted) {
+            // 배송 완료 버튼 — 상대방 주소는 미리 볼 수 있어도, 발송 액션은 내가 배송지 확정을
+            // 마친 뒤에만 가능하게 막는다(그 전에 호출하면 서버가 상태 오류를 준다).
+            if (!myAddressConfirmed) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(AccentYellow.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "아직 배송지 확정 전이에요. 확정하면 발송할 수 있어요",
+                        color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+            } else if (!myShipped) {
                 Button(
                     onClick = {
-                        AppState.startShipping(matchId)
-                        shippingStarted = true
+                        if (match != null) AppState.startShipping(matchId) else AppState.shipMatchRoom(matchId)
                     },
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                     shape    = RoundedCornerShape(14.dp),
@@ -197,8 +267,11 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null,
                         tint = StatusComplete, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("발송 완료됐어요! 상대방 수령을 기다려주세요",
-                        color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (partnerShipped) "발송 완료됐어요! 상대방 수령을 기다려주세요"
+                        else "발송 완료됐어요! 상대방 발송을 기다리는 중이에요",
+                        color = StatusComplete, fontSize = 13.sp, fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -207,6 +280,23 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
                 Text("돌아가기", color = TextTertiary)
             }
             Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun ItemThumbRow(items: List<com.fighteam.wannawear.data.model.ClothingItem>, modifier: Modifier = Modifier) {
+    if (items.size <= 1) {
+        AsyncImage(
+            items.firstOrNull()?.image, null,
+            modifier = modifier.then(Modifier.size(56.dp)).clip(RoundedCornerShape(10.dp)),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        LazyRow(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(items, key = { it.id }) { item ->
+                AsyncImage(item.image, null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+            }
         }
     }
 }

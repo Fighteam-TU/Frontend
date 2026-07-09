@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    백엔드 서버(119.206.244.145)가 아직 HTTPS가 아니라 평문 HTTP만 지원하므로,
+    targetSdk 28+ 기본 정책(cleartext 차단)에서 이 IP만 예외로 허용한다.
+    운영 서버가 HTTPS로 전환되면 이 파일과 매니페스트의 참조를 제거할 것.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">119.206.244.145</domain>
+    </domain-config>
+</network-security-config>

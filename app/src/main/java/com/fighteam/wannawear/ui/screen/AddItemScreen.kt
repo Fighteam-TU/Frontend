@@ -1,5 +1,9 @@
 package com.fighteam.wannawear.ui.screen
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,16 +19,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.data.model.*
+import com.fighteam.wannawear.data.remote.RetrofitClient
 import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddItemScreen(onBack: () -> Unit) {
-    var photoUrl by remember { mutableStateOf("") }        // 대표 사진 URL (실제 앱 = 갤러리)
+    var photoUrl by remember { mutableStateOf("") }        // 대표 사진 URL (POST /api/uploads 결과)
     var wearingUrl by remember { mutableStateOf("") }      // 실착 샷 URL
     var name by remember { mutableStateOf("") }
     var brand by remember { mutableStateOf("") }
@@ -36,13 +47,72 @@ fun AddItemScreen(onBack: () -> Unit) {
     var tagInput by remember { mutableStateOf("") }
     var tags by remember { mutableStateOf(listOf<String>()) }
 
-    val conditions = listOf("새상품", "거의 새것", "양호", "보통", "사용감 있음")
-    val canSave = name.isNotBlank() && brand.isNotBlank() && size.isNotBlank() && selectedCondition.isNotBlank()
+    // ── 실제 사진 업로드 (갤러리 선택 → POST /api/uploads) ──────────────
+    var isUploadingPhoto by remember { mutableStateOf(false) }
+    var isUploadingWearing by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
+    suspend fun uploadPickedImage(uri: Uri, purpose: String): String? {
+        return try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: return null
+            val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+            val ext = when {
+                mime.contains("png")  -> "png"
+                mime.contains("webp") -> "webp"
+                mime.contains("gif")  -> "gif"
+                else                  -> "jpg"
+            }
+            val body = bytes.toRequestBody(mime.toMediaTypeOrNull())
+            val part = MultipartBody.Part.createFormData("file", "upload.$ext", body)
+            val purposeBody = purpose.toRequestBody("text/plain".toMediaTypeOrNull())
+            val res = RetrofitClient.api.uploadFile(part, purposeBody)
+            if (res.success) res.data?.fileUrl else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            isUploadingPhoto = true
+            scope.launch {
+                val url = uploadPickedImage(uri, "item_image")
+                isUploadingPhoto = false
+                if (url != null) photoUrl = url
+                else scope.launch { snackbarHostState.showSnackbar("사진 업로드에 실패했어요. 다시 시도해주세요.") }
+            }
+        }
+    }
+    val wearingPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            isUploadingWearing = true
+            scope.launch {
+                val url = uploadPickedImage(uri, "wearing_image")
+                isUploadingWearing = false
+                if (url != null) wearingUrl = url
+                else scope.launch { snackbarHostState.showSnackbar("사진 업로드에 실패했어요. 다시 시도해주세요.") }
+            }
+        }
+    }
+
+    val conditions = listOf("새상품", "거의 새것", "양호", "보통", "사용감 있음")
+    val canSave = name.isNotBlank() && brand.isNotBlank() && size.isNotBlank() &&
+        selectedCondition.isNotBlank() && photoUrl.isNotBlank() &&
+        !isUploadingPhoto && !isUploadingWearing
+
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier
             .fillMaxSize()
             .background(BgPrimary)
+            .imePadding()
     ) {
         // 앱바
         Row(
@@ -60,8 +130,8 @@ fun AddItemScreen(onBack: () -> Unit) {
                 onClick = {
                     if (canSave) {
                         val newItem = ClothingItem(
-                            id = System.currentTimeMillis().toInt(),
-                            image = photoUrl.ifBlank { "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=200&h=260&fit=crop" },
+                            id = 0, // 서버가 실제 id를 부여함 (요청 바디엔 안 쓰임)
+                            image = photoUrl,
                             wearingImage = wearingUrl,
                             name = name,
                             brand = brand,
@@ -70,12 +140,13 @@ fun AddItemScreen(onBack: () -> Unit) {
                             condition = selectedCondition,
                             category = selectedCategory ?: ClothingCategory.OTHER,
                             description = description,
-                            user = DummyData.me,
+                            user = AppState.myProfile ?: User(0, "", 0, ""),
                             tags = tags,
                             isListed = true
                         )
-                        AppState.addMyItem(newItem)
-                        onBack()
+                        AppState.addMyItem(newItem) { success ->
+                            if (success) onBack()
+                        }
                     }
                 },
                 enabled = canSave,
@@ -106,20 +177,20 @@ fun AddItemScreen(onBack: () -> Unit) {
                 PhotoPickerBox(
                     label = "대표 사진 *",
                     url = photoUrl,
+                    isUploading = isUploadingPhoto,
                     modifier = Modifier.weight(1f).height(160.dp),
                     onClick = {
-                        // 실제 앱: 갤러리 런처 호출
-                        // 데모: Unsplash 랜덤 사진으로 대체
-                        photoUrl = "https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=200&h=260&fit=crop"
+                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }
                 )
                 // 실착 샷
                 PhotoPickerBox(
                     label = "실착 샷 (선택)",
                     url = wearingUrl,
+                    isUploading = isUploadingWearing,
                     modifier = Modifier.weight(1f).height(160.dp),
                     onClick = {
-                        wearingUrl = "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=200&h=260&fit=crop"
+                        wearingPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }
                 )
             }
@@ -255,7 +326,12 @@ fun AddItemScreen(onBack: () -> Unit) {
 
             if (tags.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // #3: FlowRow로 교체 — 태그가 많아도 자동 줄바꿈
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement   = Arrangement.spacedBy(6.dp)
+                ) {
                     tags.forEach { tag ->
                         Row(
                             Modifier
@@ -265,7 +341,8 @@ fun AddItemScreen(onBack: () -> Unit) {
                         ) {
                             Text("#$tag", color = TextPrimary, fontSize = 11.sp)
                             Spacer(Modifier.width(4.dp))
-                            Icon(Icons.Default.Close, contentDescription = null, tint = TextTertiary,
+                            Icon(Icons.Default.Close, contentDescription = null,
+                                tint = TextTertiary,
                                 modifier = Modifier.size(12.dp).clickable { tags = tags - tag })
                         }
                     }
@@ -275,6 +352,19 @@ fun AddItemScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(32.dp))
         }
     }
+
+    SnackbarHost(
+        hostState = snackbarHostState,
+        modifier  = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
+    ) { data ->
+        Snackbar(
+            snackbarData   = data,
+            containerColor = BgCard,
+            contentColor   = TextPrimary,
+            shape          = RoundedCornerShape(12.dp)
+        )
+    }
+    } // close 최상단 Box
 }
 
 // ── 공통 컴포넌트 ─────────────────────────────────────────────────────
@@ -337,6 +427,7 @@ private fun PhotoPickerBox(
     label: String,
     url: String,
     modifier: Modifier = Modifier,
+    isUploading: Boolean = false,
     onClick: () -> Unit
 ) {
     Box(
@@ -344,7 +435,7 @@ private fun PhotoPickerBox(
             .clip(RoundedCornerShape(16.dp))
             .background(BgCard)
             .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick),
+            .clickable(enabled = !isUploading, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         if (url.isNotBlank()) {
@@ -356,12 +447,19 @@ private fun PhotoPickerBox(
             )
             // 재선택 힌트
             Box(Modifier.fillMaxSize().background(Color(0x33000000)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                if (!isUploading) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                }
             }
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Default.Add, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(28.dp))
                 Text(label, color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        if (isUploading) {
+            Box(Modifier.fillMaxSize().background(Color(0x88000000)), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AccentYellow, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
             }
         }
     }
