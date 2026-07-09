@@ -51,6 +51,14 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
     val currentRoom  by remember { derivedStateOf { AppState.matchRooms.firstOrNull { it.id == matchId } } }
     val myShipped      = currentMatch?.myShipped == true || currentRoom?.myShipped == true
     val partnerShipped = currentMatch?.theirShipped == true || currentRoom?.theirShipped == true
+    // ⚠️ 2026-07-09 버그 수정: 상대방이 먼저 배송지를 확정하면 partnerAddress가 서버에서 이미
+    // 내려오는데(위 partnerAddress 주석 참고), 예전엔 이 화면 자체를 "내가 배송지를 확정해서
+    // status가 CONFIRMED가 된 경우"에만 들어올 수 있게 해놔서 — 내가 아직 확정 전이면 상대방
+    // 주소가 이미 준비돼 있어도 볼 방법이 아예 없었음(실제로 발송하려면 주소를 알아야 하는데도).
+    // 호출부(MatchRoomsScreen/MatchesScreen)에서 상대방이 확정했으면 내가 확정 전이어도 이
+    // 화면에 들어올 수 있게 바꿨고, 여기서는 "발송 완료" 액션만 내 확정이 끝난 뒤로 막아준다
+    // (그 전에 발송 처리를 하면 서버가 상태 오류를 준다).
+    val myAddressConfirmed = currentMatch?.myConfirmed == true || currentRoom?.myConfirmed == true
     val partnerName    = match?.partner?.name ?: room!!.partner.name
     val partnerAddress = match?.partnerAddress ?: room?.partnerAddress
     // 1:1이면 아이템 하나씩, 매칭룸이면 N개씩 — 요약 행에서 둘 다 처리
@@ -197,8 +205,23 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
 
             Spacer(Modifier.height(28.dp))
 
-            // 배송 완료 버튼
-            if (!myShipped) {
+            // 배송 완료 버튼 — 상대방 주소는 미리 볼 수 있어도, 발송 액션은 내가 배송지 확정을
+            // 마친 뒤에만 가능하게 막는다(그 전에 호출하면 서버가 상태 오류를 준다).
+            if (!myAddressConfirmed) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(AccentYellow.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "아직 배송지 확정 전이에요. 확정하면 발송할 수 있어요",
+                        color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                    )
+                }
+            } else if (!myShipped) {
                 Button(
                     onClick = {
                         if (match != null) AppState.startShipping(matchId) else AppState.shipMatchRoom(matchId)

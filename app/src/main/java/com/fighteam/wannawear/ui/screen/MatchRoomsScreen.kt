@@ -402,6 +402,24 @@ private fun MatchRoomCard(
                 ) {
                     Text(if (room.myConfirmed) "상대방 확인 대기 중" else "배송지 확인하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
                 }
+                // ⚠️ 2026-07-09 버그 수정: 상대방이 먼저 배송지를 확정하면 서버에 partnerAddress가
+                // 이미 준비되는데, 예전엔 나도 확정해서 status가 CONFIRMED가 되기 전까진 주소를 볼
+                // 방법이 아예 없었음(실제로 발송하려면 주소를 알아야 하는데도). 상대방이 확정했으면
+                // 내가 아직 확정 전이어도 배송 안내 화면(주소만 조회, 발송 액션은 그 화면에서 계속
+                // 막힘)에 미리 들어갈 수 있게 한다.
+                if (room.theirConfirmed) {
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = onShip,
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusShipping)
+                    ) {
+                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("${room.partner.name}님이 배송지를 등록했어요 · 주소 확인하기", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
             MatchRoomStatus.CONFIRMED -> {
                 Button(
@@ -497,6 +515,126 @@ private fun MatchRoomCard(
                 }
             }
         }
+
+        // ⚠️ 2026-07-09 복구 — "매칭" 탭이 2026-07-05에 MatchesScreen(1:1)에서 이 화면(MatchRoom
+        // 기반)으로 승격될 때 신고 기능이 같이 안 옮겨져서 빠져 있었음. 매칭이 실제로 성사된
+        // 이후(선택 중 제외)에만, 방 1개당 1회만 가능하도록 MatchesScreen과 동일한 로직으로 복구.
+        if (room.status == MatchRoomStatus.MATCHED || room.status == MatchRoomStatus.CONFIRMED ||
+            room.status == MatchRoomStatus.SHIPPING || room.status == MatchRoomStatus.COMPLETE
+        ) {
+            var showReportDialog by remember { mutableStateOf(false) }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                if (AppState.canReport(room.id)) "이 거래에 문제가 있었나요? · 신고하기" else "신고가 접수됐어요",
+                color = TextTertiary, fontSize = 10.sp,
+                modifier = Modifier.fillMaxWidth()
+                    .then(
+                        if (AppState.canReport(room.id))
+                            Modifier.clickable { showReportDialog = true }
+                        else Modifier
+                    ),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            if (showReportDialog) {
+                RoomReportDialog(
+                    partnerName = room.partner.name,
+                    onDismiss = { showReportDialog = false },
+                    onSubmit = { reason, detail ->
+                        AppState.reportExchange(room.id, reason, detail)
+                        showReportDialog = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 신고 — MatchesScreen(1:1)에 있던 것과 동일한 표준 남용 방지책(사유 선택 필수 + 최종 확인
+// 단계)을 매칭룸에도 복구. AppState.reportExchange/canReport는 matchId(Int)만 받으므로
+// roomId를 그대로 넘기면 동일하게 동작한다.
+// ─────────────────────────────────────────────────────────────────────
+
+private enum class RoomReportReason(val code: String, val label: String) {
+    NO_SHIP("NO_SHIP", "발송을 안 하거나 연락이 끊겼어요"),
+    FAKE_OR_DAMAGED("FAKE_OR_DAMAGED", "설명과 다르거나 파손된 상품을 보냈어요"),
+    RUDE_BEHAVIOR("RUDE_BEHAVIOR", "욕설·비매너 행동을 했어요"),
+    SCAM_SUSPECTED("SCAM_SUSPECTED", "사기가 의심돼요"),
+    OTHER("OTHER", "기타")
+}
+
+@Composable
+private fun RoomReportDialog(
+    partnerName: String,
+    onDismiss: () -> Unit,
+    onSubmit: (reason: String, detail: String?) -> Unit
+) {
+    var step by remember { mutableStateOf(1) } // 1: 사유 선택, 2: 최종 확인
+    var selectedReason by remember { mutableStateOf<RoomReportReason?>(null) }
+    var detail by remember { mutableStateOf("") }
+
+    if (step == 1) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("${partnerName}님을 신고할까요?", fontWeight = FontWeight.Bold, fontSize = 15.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("사유를 선택해주세요", color = TextSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(4.dp))
+                    RoomReportReason.values().forEach { reason ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { selectedReason = reason }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedReason == reason,
+                                onClick  = { selectedReason = reason },
+                                colors   = RadioButtonDefaults.colors(selectedColor = AccentYellow)
+                            )
+                            Text(reason.label, color = TextPrimary, fontSize = 13.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = detail,
+                        onValueChange = { if (it.length <= 300) detail = it },
+                        placeholder = { Text("상황을 자세히 알려주세요 (선택)", fontSize = 12.sp) },
+                        minLines = 2, maxLines = 4,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { if (selectedReason != null) step = 2 },
+                    enabled = selectedReason != null
+                ) { Text("다음", color = AccentYellow, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) { Text("취소", color = TextTertiary) }
+            }
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("정말 신고할까요?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "허위 신고는 이용 제재 대상이 될 수 있어요. 신고 후에는 취소할 수 없어요.",
+                    color = TextSecondary, fontSize = 12.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    selectedReason?.let { onSubmit(it.code, detail) }
+                }) { Text("신고하기", color = PassColor, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { step = 1 }) { Text("뒤로", color = TextTertiary) }
+            }
+        )
     }
 }
 
