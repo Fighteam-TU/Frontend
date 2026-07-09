@@ -4,11 +4,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -22,11 +25,20 @@ import com.fighteam.wannawear.ui.screen.*
 import com.fighteam.wannawear.ui.theme.*
 import kotlinx.coroutines.delay
 
-sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    object Discover      : Screen("discover",           "발견", Icons.Default.Search)
-    object Matches       : Screen("matches",            "매칭", Icons.Default.Favorite)
-    object Closet        : Screen("closet",             "옷장", Icons.Default.CheckCircle)
-    object Profile       : Screen("profile",            "나",   Icons.Default.Person)
+sealed class Screen(
+    val route: String,
+    val label: String,
+    val icon: ImageVector,
+    // 하단 탭에서 선택 상태일 때 쓸 채워진(Filled) 아이콘. 미지정 시 기본 아이콘 그대로 사용.
+    val selectedIcon: ImageVector = icon
+) {
+    // ⚠️ 2026-07-09 하단 바 리디자인 — 발견 탭이 검색 화면과 같은 돋보기라 혼동되던 것을
+    // 나침반(Explore)으로, 옷장은 의미 없던 CheckCircle을 옷걸이(Checkroom)로 교체.
+    // 비선택=Outlined / 선택=Filled 페어로 현재 탭이 한눈에 구분되도록 함.
+    object Discover      : Screen("discover",           "발견", Icons.Outlined.Explore,        Icons.Filled.Explore)
+    object Matches       : Screen("matches",            "매칭", Icons.Outlined.FavoriteBorder, Icons.Filled.Favorite)
+    object Closet        : Screen("closet",             "옷장", Icons.Outlined.Checkroom,      Icons.Filled.Checkroom)
+    object Profile       : Screen("profile",            "나",   Icons.Outlined.Person,         Icons.Filled.Person)
     object AddItem       : Screen("add_item",           "추가", Icons.Default.Add)
     object Chat          : Screen("chat/{matchId}",     "채팅", Icons.Default.ChatBubbleOutline)
     object ShippingGuide : Screen("shipping/{matchId}", "배송", Icons.Default.LocalShipping)
@@ -126,10 +138,16 @@ fun WannaWearNavGraph() {
         },
         bottomBar = {
             if (showBottomBar) {
+                // ⚠️ 2026-07-09 수정 — 엣지투엣지 모드에서 height(66.dp) 고정 시 NavigationBar가
+                // 내부적으로 추가하는 시스템 내비게이션 바 인셋 패딩이 콘텐츠 영역(66dp)을 잠식해
+                // 아이콘/라벨이 시스템 바 뒤에 깔려 잘리고 터치 영역도 줄어드는 문제가 있었음.
+                // → 콘텐츠 66dp + 기기별 인셋 높이를 더해 전체 높이를 동적으로 계산.
+                //    (제스처/3버튼 내비게이션 모두 대응)
+                val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                 NavigationBar(
                     containerColor = NavBgColor,
                     tonalElevation = 0.dp,
-                    modifier       = Modifier.height(66.dp)
+                    modifier       = Modifier.height(66.dp + bottomInset)
                 ) {
                     bottomNavItems.forEach { screen ->
                         val selected = currentRoute == screen.route
@@ -142,14 +160,29 @@ fun WannaWearNavGraph() {
                                     restoreState    = true
                                 }
                             },
-                            icon  = { Icon(screen.icon, contentDescription = screen.label, modifier = Modifier.size(20.dp)) },
-                            label = { Text(screen.label) },
+                            icon  = {
+                                Icon(
+                                    imageVector        = if (selected) screen.selectedIcon else screen.icon,
+                                    contentDescription = screen.label,
+                                    modifier           = Modifier.size(22.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text       = screen.label,
+                                    fontSize   = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            // 선택된 탭만 라벨 표시 → 66dp 컴팩트 높이에서 아이콘/라벨 공간 확보
+                            alwaysShowLabel = false,
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor   = AccentYellow,
                                 selectedTextColor   = AccentYellow,
                                 unselectedIconColor = TextTertiary,
                                 unselectedTextColor = TextTertiary,
-                                indicatorColor      = NavBgColor
+                                // 기존엔 배경색과 동일해서 인디케이터가 안 보였음 → 액센트 14% 필로 은은하게 표시
+                                indicatorColor      = AccentYellow.copy(alpha = 0.14f)
                             )
                         )
                     }
