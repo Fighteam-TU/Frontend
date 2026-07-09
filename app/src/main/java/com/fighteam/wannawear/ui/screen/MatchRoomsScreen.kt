@@ -70,6 +70,9 @@ fun MatchRoomsScreen(
     // ⚠️ 2026-07-07 추가 — 교환 개수(내가 받을 옷 개수 vs 상대가 받을 옷 개수)가 다른 채로 잠그면
     // 한쪽이 더 많이/적게 받는 불공정한 교환이 될 수 있어서, 잠그기 직전에 한 번 더 확인시킨다.
     var lockConfirmRoomId by remember { mutableStateOf<Int?>(null) }
+    // ✅ 2026-07-09 추가 — 매칭 카드에서 옷 썸네일을 눌렀을 때 옷장과 동일한 상세보기를
+    // 보여주기 위한 상태. 매칭 중인 옷이라 좋아요/삭제 액션은 노출하지 않음(showLikeButton=false).
+    var detailItem by remember { mutableStateOf<ClothingItem?>(null) }
     // ✅ 탭/화면 이동 후 돌아와도 보고 있던 필터 유지 (remember는 백스택 복귀 시 초기화됨)
     var selectedFilter by rememberSaveable { mutableStateOf(RoomFilter.ALL) }
     val scope = rememberCoroutineScope()
@@ -77,6 +80,15 @@ fun MatchRoomsScreen(
     LaunchedEffect(Unit) { AppState.refreshMatchRooms() }
 
     val filteredRooms = rooms.filter { it.matchesFilter(selectedFilter) }
+
+    detailItem?.let { item ->
+        ItemDetailSheet(
+            item = item,
+            showLikeButton = false,
+            onLike = {},
+            onDismiss = { detailItem = null }
+        )
+    }
 
     addressPromptRoomId?.let { roomId ->
         AddressPromptDialog(
@@ -274,7 +286,8 @@ fun MatchRoomsScreen(
                             },
                             onComplete        = { AppState.completeMatchRoom(room.id) },
                             onRequestCancel   = { cancelConfirmRoomId = room.id },
-                            onRequestModification = { modificationRoomId = room.id }
+                            onRequestModification = { modificationRoomId = room.id },
+                            onItemClick       = { detailItem = it }
                         )
                     }
                 }
@@ -293,7 +306,8 @@ private fun MatchRoomCard(
     onShip: () -> Unit,
     onComplete: () -> Unit,
     onRequestCancel: () -> Unit,
-    onRequestModification: () -> Unit
+    onRequestModification: () -> Unit,
+    onItemClick: (ClothingItem) -> Unit
 ) {
     val statusColor = when (room.status) {
         MatchRoomStatus.SELECTING -> StatusPending
@@ -362,9 +376,9 @@ private fun MatchRoomCard(
         Spacer(Modifier.height(10.dp))
 
         // 내가 받을 아이템들 / 상대가 받을 아이템들 — N개일 수 있어서 가로 스크롤 행으로
-        WantListRow(title = "내가 받을 옷", items = room.myWantList)
+        WantListRow(title = "내가 받을 옷", items = room.myWantList, onItemClick = onItemClick)
         Spacer(Modifier.height(6.dp))
-        WantListRow(title = "상대가 받을 옷", items = room.theirWantList)
+        WantListRow(title = "상대가 받을 옷", items = room.theirWantList, onItemClick = onItemClick)
 
         // 개수가 다르면 잠그기 전부터 눈에 띄게 알려준다 (요청사항: 더 많이/적게 받는 쪽에 안내)
         if (room.status == MatchRoomStatus.SELECTING && room.theirWantList.isNotEmpty() &&
@@ -679,9 +693,11 @@ private fun RoomReportDialog(
 }
 
 @Composable
-private fun WantListRow(title: String, items: List<ClothingItem>) {
+private fun WantListRow(title: String, items: List<ClothingItem>, onItemClick: (ClothingItem) -> Unit) {
     // ⚠️ 2026-07-09 — 옷 썸네일/이름이 너무 작아 잘 안 보인다는 피드백으로 56dp → 78dp,
     // 이름 폰트 8sp → 10sp로 확대.
+    // ✅ 2026-07-09 추가 — 썸네일을 누르면 옷장 상세보기(ItemDetailSheet)와 동일한 화면으로
+    // 옷 정보를 확인할 수 있게 함.
     Column {
         Text("$title (${items.size})", color = TextTertiary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(6.dp))
@@ -690,7 +706,10 @@ private fun WantListRow(title: String, items: List<ClothingItem>) {
         } else {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(items, key = { it.id }) { item ->
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable { onItemClick(item) }
+                    ) {
                         AsyncImage(
                             item.image, null,
                             modifier = Modifier.size(78.dp).clip(RoundedCornerShape(10.dp))
