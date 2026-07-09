@@ -400,7 +400,12 @@ private fun MatchRoomCard(
                         disabledContainerColor = BgCardDark, disabledContentColor = TextTertiary
                     )
                 ) {
-                    Text(if (room.myConfirmed) "상대방 확인 대기 중" else "배송지 확인하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
+                    // ⚠️ 2026-07-09 UX 수정: 이 버튼은 실제로 "매칭 확정" 액션(confirmMatchRoom)인데
+                    // 라벨이 "배송지 확인하기"로 되어 있어서, 사용자가 확정 버튼이 사라지고 갑자기
+                    // 배송 관련 버튼이 나온 것처럼 오해하는 문제가 있었음. 주소 등록은 필요할 때
+                    // 자동으로 뜨는 팝업(addressPromptRoomId)에서 처리되니, 메인 버튼은 실제 액션의
+                    // 의미(매칭 확정)를 분명히 드러내도록 라벨만 변경. 동작은 동일.
+                    Text(if (room.myConfirmed) "상대방 확인 대기 중" else "매칭 확정하기", fontWeight = FontWeight.Black, fontSize = 14.sp)
                 }
                 // ⚠️ 2026-07-09 버그 수정: 상대방이 먼저 배송지를 확정하면 서버에 partnerAddress가
                 // 이미 준비되는데, 예전엔 나도 확정해서 status가 CONFIRMED가 되기 전까진 주소를 볼
@@ -482,25 +487,32 @@ private fun MatchRoomCard(
 
         if (room.status != MatchRoomStatus.CANCELLED) {
             Spacer(Modifier.height(8.dp))
+            // ⚠️ 2026-07-09 UI 버그 수정: 버튼 3개가 weight(1f)로 좁게 나뉘는데 Material3 기본
+            // contentPadding(좌우 24dp)이 그대로 적용돼서, 아이콘+텍스트가 있는 "채팅하기"가
+            // 공간 부족으로 잘렸었음("채팅하 기") 다른 두 버튼도 여백이 과하게/불균등하게 보였음.
+            // 좌우 패딩을 좁혀서 셋 다 여유 있게 들어가도록 수정.
+            val actionButtonPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(
                     onClick = onOpenChat,
                     modifier = Modifier.weight(1f).height(38.dp),
                     shape = RoundedCornerShape(12.dp),
+                    contentPadding = actionButtonPadding,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
                 ) {
                     Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("채팅하기", fontSize = 12.sp)
+                    Spacer(Modifier.width(4.dp))
+                    Text("채팅하기", fontSize = 12.sp, maxLines = 1)
                 }
                 if (canRequestModification) {
                     OutlinedButton(
                         onClick = onRequestModification,
                         modifier = Modifier.weight(1f).height(38.dp),
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = actionButtonPadding,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusShipping)
                     ) {
-                        Text("${modificationButtonLabel}", fontSize = 12.sp)
+                        Text(modificationButtonLabel, fontSize = 12.sp, maxLines = 1)
                     }
                 }
                 if (canCancel) {
@@ -508,9 +520,10 @@ private fun MatchRoomCard(
                         onClick = onRequestCancel,
                         modifier = Modifier.weight(1f).height(38.dp),
                         shape = RoundedCornerShape(12.dp),
+                        contentPadding = actionButtonPadding,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = PassColor)
                     ) {
-                        Text("취소하기", fontSize = 12.sp)
+                        Text("취소하기", fontSize = 12.sp, maxLines = 1)
                     }
                 }
             }
