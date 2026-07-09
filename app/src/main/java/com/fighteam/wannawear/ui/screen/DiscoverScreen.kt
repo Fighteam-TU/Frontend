@@ -68,29 +68,30 @@ fun DiscoverScreen(
                         fontWeight = FontWeight.Black, fontStyle = FontStyle.Italic)
                     Text("서울 · ${cards.size}개 아이템", color = TextSecondary, fontSize = 10.sp)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(onClick = onNavigateToSearch, modifier = Modifier.size(36.dp)
-                        .background(BgCard, CircleShape)) {
+                // ⚠️ 2026-07-09 디자인 업그레이드: 아이콘마다 하얀 원 배경을 감싸는 스타일이
+                // "예뻐 보이지 않는다"는 피드백 — 배경 없이 아이콘만 노출하는 미니멀한 방식으로
+                // 변경(Linear/Arc 같은 정제된 툴바 참고). 터치 영역은 IconButton 기본 48dp로
+                // 유지하고, 아이콘 자체를 좀 더 크고 진하게(TextPrimary)해서 존재감은 유지.
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    IconButton(onClick = onNavigateToSearch, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.Default.Search, contentDescription = "검색",
-                            tint = TextSecondary, modifier = Modifier.size(16.dp))
+                            tint = TextPrimary, modifier = Modifier.size(21.dp))
                     }
                     Box {
-                        IconButton(onClick = onNavigateToNotifications, modifier = Modifier.size(36.dp)
-                            .background(BgCard, CircleShape)) {
+                        IconButton(onClick = onNavigateToNotifications, modifier = Modifier.size(40.dp)) {
                             Icon(Icons.Default.Notifications, contentDescription = "알림",
-                                tint = TextSecondary, modifier = Modifier.size(16.dp))
+                                tint = TextPrimary, modifier = Modifier.size(21.dp))
                         }
                         if (AppState.unreadNotificationCount > 0) {
                             Box(
-                                Modifier.size(9.dp).align(Alignment.TopEnd)
+                                Modifier.size(8.dp).align(Alignment.TopEnd).offset(x = (-6).dp, y = 6.dp)
                                     .background(PassColor, CircleShape)
                             )
                         }
                     }
-                    IconButton(onClick = {}, modifier = Modifier.size(36.dp)
-                        .background(BgCard, CircleShape)) {
+                    IconButton(onClick = {}, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.Default.Settings, contentDescription = null,
-                            tint = TextSecondary, modifier = Modifier.size(16.dp))
+                            tint = TextPrimary, modifier = Modifier.size(21.dp))
                     }
                 }
             }
@@ -338,46 +339,50 @@ fun SwipeCard(
                 AsyncImage(item.user.avatar, null,
                     modifier = Modifier.size(20.dp).clip(CircleShape))
                 Spacer(Modifier.width(6.dp))
-                Text(item.user.name, color = TextPrimary, fontSize = 11.sp,
+                Text(item.user.name, color = OverlayTextPrimary, fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold)
             }
             if (item.distance.isNotEmpty()) {
-                Text(item.distance, color = TextSecondary, fontSize = 11.sp,
+                Text(item.distance, color = OverlayTextSecondary, fontSize = 11.sp,
                     modifier = Modifier.background(Color(0x80000000), RoundedCornerShape(50))
                         .padding(horizontal = 10.dp, vertical = 6.dp))
             }
         }
 
         // 하단 정보
+        // ⚠️ 2026-07-09 — 이름은 잘 보이지만 브랜드/태그/사이즈 같은 부가정보는 여전히 흐릿
+        // 하다는 피드백. 원인은 그라디언트가 위쪽일수록 옅어지는데, 부가정보 텍스트들이 이
+        // Column 상단 쪽(=그라디언트가 아직 옅은 구간)에 몰려 있어서였음 — 중간 스탑을 추가해
+        // 텍스트 블록 전체 구간이 확실히 어둡게 깔리도록 강화.
         Box(
             Modifier.fillMaxWidth().align(Alignment.BottomStart)
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEB000000))))
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xB3000000), Color(0xF7000000))))
         ) {
             Column(Modifier.padding(20.dp)) {
                 Row(Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment     = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
-                        Text(item.brand.uppercase(), color = Color(0x73FFFFFF),
+                        Text(item.brand.uppercase(), color = OverlayTextTertiary,
                             fontSize = 10.sp, letterSpacing = 1.5.sp)
-                        Text(item.name, color = TextPrimary, fontSize = 20.sp,
+                        Text(item.name, color = OverlayTextPrimary, fontSize = 20.sp,
                             fontWeight = FontWeight.Black)
                     }
                     Column(horizontalAlignment = Alignment.End,
                         verticalArrangement    = Arrangement.spacedBy(4.dp)) {
-                        Text(item.condition, color = AccentYellow, fontSize = 10.sp,
+                        Text(item.condition, color = OverlayTextPrimary, fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.background(Color(0x2EE4D94A), RoundedCornerShape(50))
+                            modifier = Modifier.background(AccentYellow.copy(alpha = 0.55f), RoundedCornerShape(50))
                                 .padding(horizontal = 10.dp, vertical = 4.dp))
                         Text("${item.size}  ${item.heightFit}",
-                            color = Color(0x80FFFFFF), fontSize = 10.sp)
+                            color = OverlayTextSecondary, fontSize = 10.sp)
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     item.tags.forEach { tag ->
-                        Text("#$tag", color = Color(0x8CFFFFFF), fontSize = 10.sp,
-                            modifier = Modifier.background(Color(0x1AFFFFFF), RoundedCornerShape(50))
+                        Text("#$tag", color = OverlayTextPrimary, fontSize = 10.sp,
+                            modifier = Modifier.background(Color(0x40FFFFFF), RoundedCornerShape(50))
                                 .padding(horizontal = 8.dp, vertical = 3.dp))
                     }
                 }
@@ -397,13 +402,13 @@ fun SwipeCard(
                 if (showDetail && isTop) {
                     Spacer(Modifier.height(6.dp))
                     if (item.description.isNotEmpty()) {
-                        Text("📝 ${item.description}", color = Color(0xCCFFFFFF), fontSize = 11.sp,
-                            modifier = Modifier.background(Color(0x1AFFFFFF), RoundedCornerShape(8.dp))
+                        Text("📝 ${item.description}", color = OverlayTextPrimary, fontSize = 11.sp,
+                            modifier = Modifier.background(Color(0x40FFFFFF), RoundedCornerShape(8.dp))
                                 .padding(horizontal = 10.dp, vertical = 6.dp))
                     }
                     if (item.wearingImage.isNotEmpty()) {
                         Spacer(Modifier.height(6.dp))
-                        Text("실착 샷", color = TextSecondary, fontSize = 10.sp)
+                        Text("실착 샷", color = OverlayTextSecondary, fontSize = 10.sp)
                         Spacer(Modifier.height(4.dp))
                         AsyncImage(
                             model              = item.wearingImage,
@@ -444,9 +449,9 @@ fun RealMatchPopup(match: MatchItem, onClose: () -> Unit) {
                     Box(Modifier.fillMaxSize().background(
                         Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))) {
                         Column(Modifier.padding(12.dp).align(Alignment.BottomStart)) {
-                            Text(match.myItem.name, color = TextPrimary, fontSize = 11.sp,
+                            Text(match.myItem.name, color = OverlayTextPrimary, fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold)
-                            Text("내 옷", color = Color(0x66FFFFFF), fontSize = 10.sp)
+                            Text("내 옷", color = OverlayTextTertiary, fontSize = 10.sp)
                         }
                     }
                 }
@@ -458,9 +463,9 @@ fun RealMatchPopup(match: MatchItem, onClose: () -> Unit) {
                     Box(Modifier.fillMaxSize().background(
                         Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))) {
                         Column(Modifier.padding(12.dp).align(Alignment.BottomStart)) {
-                            Text(match.theirItem.name, color = TextPrimary, fontSize = 11.sp,
+                            Text(match.theirItem.name, color = OverlayTextPrimary, fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold)
-                            Text(match.partner.name, color = Color(0x66FFFFFF), fontSize = 10.sp)
+                            Text(match.partner.name, color = OverlayTextTertiary, fontSize = 10.sp)
                         }
                     }
                 }

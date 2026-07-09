@@ -173,23 +173,40 @@ fun MatchRoomsScreen(
     }
 
     Column(Modifier.fillMaxSize().background(BgPrimary)) {
-        Column(Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp)) {
-            Text("매칭", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
-            Text("총 ${rooms.size}건", color = TextSecondary, fontSize = 10.sp)
+        // ⚠️ 2026-07-09 — "총 N건"을 타이틀 아래 별도 줄로 두니 상단이 불필요하게 넓어져서
+        // 카드가 한 화면에 다 안 보인다는 피드백. 타이틀과 한 줄에 나란히 배치하고 상단
+        // 패딩도 줄여서 아래 컴포넌트들이 전체적으로 위로 올라오게 함.
+        Row(
+            Modifier.padding(start = 20.dp, top = 14.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(
+                "매칭", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Black,
+                letterSpacing = (-0.5).sp
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("총 ${rooms.size}건", color = TextSecondary, fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 1.dp))
         }
 
-        // 상태별 필터 탭
+        // 상태별 필터 탭 — ⚠️ 2026-07-09 디자인 업그레이드: 선택된 탭에도 카드와 같은 계열의
+        // 은은한 그림자를 줘서 "떠 있는 세그먼트"처럼 보이게 다듬음(Linear/Stripe 대시보드류
+        // 세그먼트 컨트롤 참고). 트랙 자체는 배경과 톤온톤으로 낮춰서 과하지 않게.
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                .background(BgCard, RoundedCornerShape(12.dp))
+                .background(BgCardDark.copy(alpha = 0.5f), RoundedCornerShape(14.dp))
                 .padding(4.dp)
         ) {
             RoomFilter.values().forEach { filter ->
                 val selected = selectedFilter == filter
                 Button(
                     onClick = { selectedFilter = filter },
-                    modifier = Modifier.weight(1f).height(34.dp),
-                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f).height(36.dp)
+                        .then(
+                            if (selected) Modifier.shadow(elevation = 2.dp, shape = RoundedCornerShape(10.dp), ambientColor = CardShadow, spotColor = CardShadow)
+                            else Modifier
+                        ),
+                    shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (selected) AccentYellow else Color.Transparent,
                         contentColor   = if (selected) AccentYellowText else TextSecondary
@@ -197,7 +214,7 @@ fun MatchRoomsScreen(
                     elevation = ButtonDefaults.buttonElevation(0.dp),
                     contentPadding = PaddingValues(horizontal = 2.dp)
                 ) {
-                    Text(filter.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 10.sp, maxLines = 1)
+                    Text(filter.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, fontSize = 11.sp, maxLines = 1)
                 }
             }
         }
@@ -228,7 +245,7 @@ fun MatchRoomsScreen(
                 LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(filteredRooms, key = { it.id }) { room ->
                         MatchRoomCard(
@@ -278,12 +295,12 @@ private fun MatchRoomCard(
     onRequestCancel: () -> Unit,
     onRequestModification: () -> Unit
 ) {
-    val (statusColor, statusBg) = when (room.status) {
-        MatchRoomStatus.SELECTING -> Pair(StatusPending, StatusPending.copy(alpha = 0.12f))
-        MatchRoomStatus.MATCHED   -> Pair(AccentYellow, AccentYellow.copy(alpha = 0.12f))
-        MatchRoomStatus.CONFIRMED, MatchRoomStatus.SHIPPING -> Pair(StatusShipping, StatusShipping.copy(alpha = 0.12f))
-        MatchRoomStatus.COMPLETE  -> Pair(StatusComplete, StatusComplete.copy(alpha = 0.12f))
-        MatchRoomStatus.CANCELLED -> Pair(TextTertiary, TextTertiary.copy(alpha = 0.12f))
+    val statusColor = when (room.status) {
+        MatchRoomStatus.SELECTING -> StatusPending
+        MatchRoomStatus.MATCHED   -> AccentYellow
+        MatchRoomStatus.CONFIRMED, MatchRoomStatus.SHIPPING -> StatusShipping
+        MatchRoomStatus.COMPLETE  -> StatusComplete
+        MatchRoomStatus.CANCELLED -> TextTertiary
     }
     // ⚠️ 2026-07-09 — 요청사항: 아이템 선택 확정 전(SELECTING)에도 교환 제안을 보낼 수 있게
     // 해달라는 요청 반영. 서버가 SELECTING 단계에서 request-modification API 자체를 막아뒀지만
@@ -299,7 +316,7 @@ private fun MatchRoomCard(
             // ⚠️ 2026-07-09 — 순백에 가까운 배경에서는 그림자가 없으면 카드가 배경과 거의 안
             // 구분돼서 밋밋해 보였음. 은은한 그림자로 입체감을 살림.
             .shadow(elevation = 3.dp, shape = RoundedCornerShape(18.dp), ambientColor = CardShadow, spotColor = CardShadow)
-            .background(BgCard, RoundedCornerShape(18.dp)).padding(18.dp)
+            .background(BgCard, RoundedCornerShape(18.dp)).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // ⚠️ 2026-07-09 — 아바타/텍스트가 전반적으로 작아서 잘 안 보인다는 피드백 반영,
@@ -319,12 +336,15 @@ private fun MatchRoomCard(
                 }
                 Text(room.date, color = TextSecondary, fontSize = 11.sp)
             }
-            Text(
-                room.status.label, color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.background(statusBg, RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp)
-            )
+            // ⚠️ 2026-07-09 디자인 업그레이드: 진한 배경 배지 대신 점(dot) + 라벨로 절제된
+            // 상태 표시(Linear류 상태 인디케이터 참고) — 색은 그대로 상태별 의미 유지, 톤만 정제.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).background(statusColor, CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text(room.status.label, color = statusColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Text(room.status.description, color = TextSecondary, fontSize = 13.sp)
 
         if (room.modificationRequestedByThem) {
@@ -339,11 +359,11 @@ private fun MatchRoomCard(
             Text("수정 요청을 보냈어요 · 상대방 응답을 기다리는 중", color = StatusPending, fontSize = 12.sp)
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
         // 내가 받을 아이템들 / 상대가 받을 아이템들 — N개일 수 있어서 가로 스크롤 행으로
         WantListRow(title = "내가 받을 옷", items = room.myWantList)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         WantListRow(title = "상대가 받을 옷", items = room.theirWantList)
 
         // 개수가 다르면 잠그기 전부터 눈에 띄게 알려준다 (요청사항: 더 많이/적게 받는 쪽에 안내)
@@ -368,7 +388,7 @@ private fun MatchRoomCard(
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
 
         when (room.status) {
             MatchRoomStatus.SELECTING -> {
@@ -543,7 +563,7 @@ private fun MatchRoomCard(
             room.status == MatchRoomStatus.SHIPPING || room.status == MatchRoomStatus.COMPLETE
         ) {
             var showReportDialog by remember { mutableStateOf(false) }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 if (AppState.canReport(room.id)) "이 거래에 문제가 있었나요? · 신고하기" else "신고가 접수됐어요",
                 color = TextTertiary, fontSize = 10.sp,
@@ -673,7 +693,8 @@ private fun WantListRow(title: String, items: List<ClothingItem>) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         AsyncImage(
                             item.image, null,
-                            modifier = Modifier.size(78.dp).clip(RoundedCornerShape(10.dp)),
+                            modifier = Modifier.size(78.dp).clip(RoundedCornerShape(10.dp))
+                                .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp)),
                             contentScale = ContentScale.Crop
                         )
                         Spacer(Modifier.height(4.dp))

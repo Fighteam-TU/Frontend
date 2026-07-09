@@ -37,3 +37,12 @@ val NavBgColor       = Color(0xFFFFFCF7)
 // ✅ 카드 그림자용 — 순백 배경에선 그림자가 아예 안 보여서 카드가 "떠 보이는" 느낌이 없었음.
 //    Modifier.shadow()에 사용해서 카드에 은은한 입체감을 준다.
 val CardShadow       = Color(0x1F1A1410)
+
+// ⚠️ 2026-07-09 추가 — 발견(스와이프) 카드처럼 "사진 위 어두운 그라디언트 오버레이" 위에
+// 얹히는 텍스트 전용 색상. 이 영역은 어떤 사진이 올라오든 항상 어두운 스크림을 깔고 그 위에
+// 텍스트를 놓는 구조라, 앱이 라이트든 다크든 테마와 무관하게 항상 밝은 고정색이어야 함.
+// 라이트 테마 전환 때 이 구분 없이 TextPrimary/TextSecondary를 그대로 썼다가, 어두운 텍스트가
+// 어두운 스크림 위에 얹혀서 옷 이름이 거의 안 보이는 문제가 있었음 — 전용 상수로 분리.
+val OverlayTextPrimary   = Color(0xFFFFFFFF)
+val OverlayTextSecondary = Color(0xE6FFFFFF)
+val OverlayTextTertiary  = Color(0xC2FFFFFF)
