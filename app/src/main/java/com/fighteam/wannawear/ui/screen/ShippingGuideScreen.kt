@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.fighteam.wannawear.data.AppState
 import com.fighteam.wannawear.ui.theme.*
+import kotlinx.coroutines.launch
 
 /**
  * ⚠️ 2026-07-09 수정: 예전엔 1:1 Exchange(MatchItem) 전용이었는데, N:M 매칭룸(MatchRoom) 도입
@@ -43,6 +44,11 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
 
     val clipboard = LocalClipboardManager.current
     var copiedAddress  by remember { mutableStateOf(false) }
+    // ⚠️ 2026-07-09 추가 — 이 앱은 매칭/배송 쪽에 실시간 소켓이 없어서, 상대방이 방금 배송지를
+    // 확정해도 이 화면에 자동으로 반영되지 않는다(뒤로 나갔다 매칭 탭에서 새로고침한 뒤 다시
+    // 들어와야만 보임). 매번 그렇게 왔다갔다 하지 않아도 되도록 화면 안에 새로고침 버튼을 둔다.
+    var isRefreshing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     // ⚠️ 버그 수정: 예전엔 "전체 status == SHIPPING"만 봤는데, SHIPPING은 양쪽 다 발송해야 바뀜.
     //    그래서 내가 분명히 발송 버튼을 눌러 myShipped=true가 됐어도, 상대가 아직 안 눌렀으면
     //    status가 그대로 CONFIRMED라 버튼이 안 바뀌고 "눌러도 안 먹히는" 것처럼 보였음.
@@ -78,6 +84,22 @@ fun ShippingGuideScreen(matchId: Int, onBack: () -> Unit) {
             }
             Text("배송 안내", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black,
                 modifier = Modifier.weight(1f).padding(start = 4.dp))
+            IconButton(
+                enabled = !isRefreshing,
+                onClick = {
+                    scope.launch {
+                        isRefreshing = true
+                        runCatching { if (match != null) AppState.loadExchanges() else AppState.loadMatchRooms() }
+                        isRefreshing = false
+                    }
+                }
+            ) {
+                if (isRefreshing) {
+                    CircularProgressIndicator(color = AccentYellow, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                } else {
+                    Icon(Icons.Default.Refresh, contentDescription = "새로고침", tint = TextPrimary)
+                }
+            }
         }
 
         Column(
