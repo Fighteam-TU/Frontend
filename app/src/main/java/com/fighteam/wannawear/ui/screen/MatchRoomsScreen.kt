@@ -21,6 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -294,42 +295,48 @@ private fun MatchRoomCard(
     val canCancel = room.status != MatchRoomStatus.COMPLETE && room.status != MatchRoomStatus.CANCELLED
 
     Column(
-        Modifier.fillMaxWidth().background(BgCard, RoundedCornerShape(16.dp)).padding(16.dp)
+        Modifier.fillMaxWidth()
+            // ⚠️ 2026-07-09 — 순백에 가까운 배경에서는 그림자가 없으면 카드가 배경과 거의 안
+            // 구분돼서 밋밋해 보였음. 은은한 그림자로 입체감을 살림.
+            .shadow(elevation = 3.dp, shape = RoundedCornerShape(18.dp), ambientColor = CardShadow, spotColor = CardShadow)
+            .background(BgCard, RoundedCornerShape(18.dp)).padding(18.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(room.partner.avatar, null, modifier = Modifier.size(36.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+            // ⚠️ 2026-07-09 — 아바타/텍스트가 전반적으로 작아서 잘 안 보인다는 피드백 반영,
+            // 카드 전체 요소 크기를 한 단계씩 키움.
+            AsyncImage(room.partner.avatar, null, modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(room.partner.name, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(room.partner.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     // ✅ 상대 평점(매너온도)을 카드에서 바로 볼 수 있게 (서버 mannerScore가 있을 때만)
                     room.partner.mannerScore?.let { score ->
                         Spacer(Modifier.width(6.dp))
-                        Icon(Icons.Default.Star, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(11.dp))
+                        Icon(Icons.Default.Star, contentDescription = null, tint = AccentYellow, modifier = Modifier.size(13.dp))
                         Spacer(Modifier.width(2.dp))
-                        Text(String.format("%.1f", score), color = AccentYellow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(String.format("%.1f", score), color = AccentYellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                Text(room.date, color = TextSecondary, fontSize = 10.sp)
+                Text(room.date, color = TextSecondary, fontSize = 11.sp)
             }
             Text(
-                room.status.label, color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.background(statusBg, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp)
+                room.status.label, color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.background(statusBg, RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
-        Spacer(Modifier.height(8.dp))
-        Text(room.status.description, color = TextSecondary, fontSize = 11.sp)
+        Spacer(Modifier.height(10.dp))
+        Text(room.status.description, color = TextSecondary, fontSize = 13.sp)
 
         if (room.modificationRequestedByThem) {
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.PriorityHigh, contentDescription = null, tint = PassColor, modifier = Modifier.size(12.dp))
+                Icon(Icons.Default.PriorityHigh, contentDescription = null, tint = PassColor, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("${room.partner.name}님이 교환 수정을 요청했어요", color = PassColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("${room.partner.name}님이 교환 수정을 요청했어요", color = PassColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         } else if (room.modificationRequestedByMe) {
             Spacer(Modifier.height(6.dp))
-            Text("수정 요청을 보냈어요 · 상대방 응답을 기다리는 중", color = StatusPending, fontSize = 11.sp)
+            Text("수정 요청을 보냈어요 · 상대방 응답을 기다리는 중", color = StatusPending, fontSize = 12.sp)
         }
 
         Spacer(Modifier.height(12.dp))
@@ -349,14 +356,14 @@ private fun MatchRoomCard(
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.PriorityHigh, contentDescription = null, tint = StatusPending, modifier = Modifier.size(12.dp))
+                Icon(Icons.Default.PriorityHigh, contentDescription = null, tint = StatusPending, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(
                     if (room.myWantList.size > room.theirWantList.size)
                         "내가 상대보다 옷을 더 많이(${room.myWantList.size}개) 골랐어요"
                     else
                         "상대가 나보다 옷을 더 많이(${room.theirWantList.size}개) 골랐어요",
-                    color = StatusPending, fontSize = 10.sp, fontWeight = FontWeight.Bold
+                    color = StatusPending, fontSize = 11.sp, fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -420,9 +427,9 @@ private fun MatchRoomCard(
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusShipping)
                     ) {
-                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("${room.partner.name}님이 배송지를 등록했어요 · 주소 확인하기", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("${room.partner.name}님이 배송지를 등록했어요 · 주소 확인하기", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -495,35 +502,35 @@ private fun MatchRoomCard(
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(
                     onClick = onOpenChat,
-                    modifier = Modifier.weight(1f).height(38.dp),
+                    modifier = Modifier.weight(1f).height(42.dp),
                     shape = RoundedCornerShape(12.dp),
                     contentPadding = actionButtonPadding,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
                 ) {
-                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("채팅하기", fontSize = 12.sp, maxLines = 1)
+                    Text("채팅하기", fontSize = 13.sp, maxLines = 1)
                 }
                 if (canRequestModification) {
                     OutlinedButton(
                         onClick = onRequestModification,
-                        modifier = Modifier.weight(1f).height(38.dp),
+                        modifier = Modifier.weight(1f).height(42.dp),
                         shape = RoundedCornerShape(12.dp),
                         contentPadding = actionButtonPadding,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusShipping)
                     ) {
-                        Text(modificationButtonLabel, fontSize = 12.sp, maxLines = 1)
+                        Text(modificationButtonLabel, fontSize = 13.sp, maxLines = 1)
                     }
                 }
                 if (canCancel) {
                     OutlinedButton(
                         onClick = onRequestCancel,
-                        modifier = Modifier.weight(1f).height(38.dp),
+                        modifier = Modifier.weight(1f).height(42.dp),
                         shape = RoundedCornerShape(12.dp),
                         contentPadding = actionButtonPadding,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = PassColor)
                     ) {
-                        Text("취소하기", fontSize = 12.sp, maxLines = 1)
+                        Text("취소하기", fontSize = 13.sp, maxLines = 1)
                     }
                 }
             }
@@ -653,22 +660,25 @@ private fun RoomReportDialog(
 
 @Composable
 private fun WantListRow(title: String, items: List<ClothingItem>) {
+    // ⚠️ 2026-07-09 — 옷 썸네일/이름이 너무 작아 잘 안 보인다는 피드백으로 56dp → 78dp,
+    // 이름 폰트 8sp → 10sp로 확대.
     Column {
-        Text("$title (${items.size})", color = TextTertiary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
+        Text("$title (${items.size})", color = TextTertiary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
         if (items.isEmpty()) {
-            Text("아직 고른 옷이 없어요", color = TextTertiary, fontSize = 11.sp)
+            Text("아직 고른 옷이 없어요", color = TextTertiary, fontSize = 12.sp)
         } else {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(items, key = { it.id }) { item ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         AsyncImage(
                             item.image, null,
-                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)),
+                            modifier = Modifier.size(78.dp).clip(RoundedCornerShape(10.dp)),
                             contentScale = ContentScale.Crop
                         )
-                        Text(item.name, color = TextSecondary, fontSize = 8.sp, maxLines = 1,
-                            modifier = Modifier.width(56.dp))
+                        Spacer(Modifier.height(4.dp))
+                        Text(item.name, color = TextSecondary, fontSize = 10.sp, maxLines = 1,
+                            modifier = Modifier.width(78.dp))
                     }
                 }
             }
